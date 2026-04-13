@@ -9,289 +9,379 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js"></script>
-<style>
-  html, body { margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #F9FAFB; }
-  * { box-sizing: border-box; }
-</style>
+<style>html,body{margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#F9FAFB}*{box-sizing:border-box}</style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
-const { useState, useCallback, useRef, useEffect } = React;
+const { useState, useCallback, useRef, useMemo } = React;
 
 
 
+// ─── Specific issue catalog ───
+// Each issue is a concrete, actionable theme (NOT generic "frustration").
+// A conversation matches an issue only if at least one of its patterns is
+// present in the message text. Quotes are pulled from sentences that contain
+// at least one of the same patterns — guaranteeing quote-to-theme fidelity.
+const ISSUE_CATALOG = [
+  // ─── MARKETPLACE ───
+  {
+    id: "mp-approval-denied",
+    product: "Marketplace",
+    theme: "Order approval denied without clear reason",
+    patterns: [/\bnot\s+approved\b/i, /\bdenied\b/i, /\bwasn'?t\s+approved\b/i, /\bwhy.*(?:denied|declined|rejected)\b/i, /\brejected\b/i, /\bdisapproved\b/i],
+    recommendation: "Surface a specific denial reason in-product immediately after a failed approval. Replace generic rejection messaging with the underlying cause (e.g., spending limit, verification, employment gap) and a clear next step.",
+    severity: 5
+  },
+  {
+    id: "mp-spending-limit-low",
+    product: "Marketplace",
+    theme: "Spending limit lower than customer expected",
+    patterns: [/\bspending\s+limit\b/i, /\blimit\s+(?:is\s+)?(?:too\s+)?low\b/i, /\bwhy.*\blimit\b/i, /\bonly\s+\$?\d+\s+(?:limit|spend)/i, /\bincrease\s+(?:my\s+)?limit\b/i],
+    recommendation: "Explain how the Marketplace spending limit is calculated in-app before customers browse. Add a transparent 'how to increase your limit' flow tied to payment history.",
+    severity: 4
+  },
+  {
+    id: "mp-tracking-broken",
+    product: "Marketplace",
+    theme: "Tracking stops updating or never starts",
+    patterns: [/\btracking\s+(?:number|info|link)?\s*(?:not|isn'?t|hasn'?t|stopped|stuck)/i, /\bno\s+tracking\b/i, /\btracking\s+hasn'?t\s+updated\b/i, /\bwhere.*my\s+order\b/i],
+    recommendation: "Instrument end-to-end tracking reliability by carrier. Add proactive in-app alerts when tracking hasn't updated in 5+ days instead of requiring customers to ask.",
+    severity: 3
+  },
+  {
+    id: "mp-item-never-shipped",
+    product: "Marketplace",
+    theme: "Order placed but item never shipped",
+    patterns: [/\bnever\s+shipped\b/i, /\bstill\s+(?:waiting|hasn'?t\s+shipped)\b/i, /\bhasn'?t\s+shipped\b/i, /\border.*(?:weeks|months)\s+ago\b/i, /\bno\s+shipping\s+confirmation\b/i],
+    recommendation: "Define a hard SLA for ship-by dates and auto-cancel/refund orders exceeding it without customer action. Expose ship-by commitment at checkout, not after purchase.",
+    severity: 5
+  },
+  {
+    id: "mp-return-refund",
+    product: "Marketplace",
+    theme: "Return or refund process is unclear or broken",
+    patterns: [/\bcan'?t\s+return\b/i, /\bhow.*return\b/i, /\brefund.*(?:not\s+received|missing|where)\b/i, /\bstill\s+waiting.*refund\b/i, /\breturn\s+policy\b/i],
+    recommendation: "Build a self-serve return flow directly in the Marketplace order history. Show refund status and ETA at every step rather than requiring support contact.",
+    severity: 4
+  },
+  {
+    id: "mp-cancel-order",
+    product: "Marketplace",
+    theme: "Customers want to cancel an order but cannot self-serve",
+    patterns: [/\bcancel\s+(?:my\s+)?order\b/i, /\bhow.*cancel.*order\b/i, /\bneed\s+to\s+cancel\b/i, /\bwant\s+to\s+cancel.*order\b/i],
+    recommendation: "Add a self-serve 'Cancel order' button available until the item ships. Today, customers have to contact support for any cancellation — a clear friction point.",
+    severity: 4
+  },
+  {
+    id: "mp-wrong-item",
+    product: "Marketplace",
+    theme: "Received wrong or damaged item",
+    patterns: [/\bwrong\s+item\b/i, /\bdamaged\b/i, /\bbroken\b/i, /\bnot\s+what\s+I\s+ordered\b/i, /\bdefective\b/i],
+    recommendation: "Create a guided wrong-item/damaged-item report flow with photo upload and same-day resolution SLA. Route to replacement or instant refund without back-and-forth.",
+    severity: 3
+  },
 
-// ─── Keyword dictionaries for intelligent categorization ───
-const PRODUCT_KEYWORDS = {
-  "Perpay+": ["perpay+", "perpay plus", "credit build", "credit score", "subscription", "credit report", "reporting", "tradeline", "credit bureau", "experian", "transunion", "equifax", "fico", "credit monitoring"],
-  "Marketplace": ["marketplace", "shopping", "shop", "order", "checkout", "approval", "spending limit", "approve", "item", "product", "cart", "purchase", "buy", "price", "shipping", "delivery", "vendor", "return", "refund"],
-  "Card": ["card", "credit card", "perpay card", "decline", "declined", "transaction", "swipe", "tap", "visa", "mastercard", "card limit", "card payment", "credit limit", "available credit", "statement", "billing cycle", "apr", "interest"],
-  "General": ["account", "login", "password", "app", "website", "support", "help", "trust", "cancel", "close account", "deactivate", "verify", "verification", "identity"]
+  // ─── CORE (payment plan / direct deposit) ───
+  {
+    id: "core-payment-not-processing",
+    product: "Core",
+    theme: "Direct deposit payment did not process",
+    patterns: [/\bdirect\s+deposit\b/i, /\bpaycheck\s+(?:not|didn'?t|missed)\b/i, /\bpayment\s+(?:not\s+process|didn'?t\s+go\s+through|missed)\b/i, /\bno\s+payment\s+taken\b/i],
+    recommendation: "Build an in-app diagnostic for direct deposit status. When a scheduled deduction is missed, notify the customer proactively with the reason (employer change, pay gap, etc.) rather than letting the balance silently grow.",
+    severity: 5
+  },
+  {
+    id: "core-employer-not-found",
+    product: "Core",
+    theme: "Employer or payroll system not recognized",
+    patterns: [/\bemployer\s+(?:not|isn'?t).*(?:listed|found|recognized)/i, /\bcan'?t\s+find\s+(?:my\s+)?employer\b/i, /\bpayroll.*not.*work/i, /\bemployer.*not\s+supported\b/i],
+    recommendation: "Expand the supported-employer list and add a clear 'request my employer' flow. For unsupported payroll systems, offer an explicit alternative path (e.g., manual pay schedule) instead of blocking.",
+    severity: 4
+  },
+  {
+    id: "core-update-payment-info",
+    product: "Core",
+    theme: "Cannot update payment or banking information",
+    patterns: [/\bupdate\s+(?:my\s+)?(?:payment|bank|direct\s+deposit)/i, /\bchange\s+(?:my\s+)?bank\b/i, /\bnew\s+(?:employer|job)\b/i, /\bswitched\s+jobs\b/i],
+    recommendation: "Build a first-class 'Update employment/payment info' flow in Settings. Today, a job change often requires support escalation — predictable life events should be self-serve.",
+    severity: 4
+  },
+  {
+    id: "core-payment-plan-confusion",
+    product: "Core",
+    theme: "Payment plan terms or balance breakdown is confusing",
+    patterns: [/\bpayment\s+plan\b/i, /\bhow\s+much.*owe\b/i, /\bbalance.*(?:wrong|doesn'?t\s+match)\b/i, /\bpayment.*schedule\b/i, /\bhow\s+many\s+payments\b/i],
+    recommendation: "Redesign the Core payment plan view to show: total remaining, per-paycheck amount, date of next deduction, and estimated payoff date — all on one screen.",
+    severity: 3
+  },
+  {
+    id: "core-early-payoff",
+    product: "Core",
+    theme: "Customers want to pay off balance early but flow is unclear",
+    patterns: [/\bpay\s+off\s+(?:early|now|full)/i, /\bearly\s+pay(?:off|ment)/i, /\blump\s+sum\b/i, /\bpay.*in\s+full\b/i],
+    recommendation: "Add a prominent 'Pay early' option in the Core dashboard with a clear preview of what the payoff removes from future paychecks.",
+    severity: 2
+  },
+
+  // ─── PERPAY+ ───
+  {
+    id: "pp-credit-not-reporting",
+    product: "Perpay+",
+    theme: "Credit score not reporting or not increasing as promised",
+    patterns: [/\bcredit\s+score\s+(?:didn'?t|hasn'?t|not)\b/i, /\bnot\s+reporting\b/i, /\bscore.*(?:drop|decrease|down)/i, /\bdidn'?t\s+(?:show|report|update)/i, /\bexperian|transunion|equifax/i],
+    recommendation: "Set explicit, honest expectations about when and how Perpay+ reports to bureaus. Show the exact report date, bureau(s) covered, and last-reported balance in-app.",
+    severity: 5
+  },
+  {
+    id: "pp-cancel-subscription",
+    product: "Perpay+",
+    theme: "Customers trying to cancel Perpay+ subscription",
+    patterns: [/\bcancel\s+(?:my\s+)?perpay\+/i, /\bcancel.*subscription\b/i, /\bunsubscribe\b/i, /\bstop.*perpay\+/i, /\bdon'?t\s+want.*perpay\+/i],
+    recommendation: "Build a transparent in-app cancellation flow with a retention step that shows credit-building progress and what they'd lose. Cancellation friction creates trust damage — make it one-click.",
+    severity: 5
+  },
+  {
+    id: "pp-value-unclear",
+    product: "Perpay+",
+    theme: "Unclear what Perpay+ does or what value it provides",
+    patterns: [/\bwhat\s+(?:is|does)\s+perpay\+/i, /\bwhy.*perpay\+/i, /\bperpay\+.*worth\b/i, /\bdidn'?t\s+know.*perpay\+/i, /\bwhat\s+am\s+I\s+paying\s+for\b/i],
+    recommendation: "Redesign the Perpay+ value prop on the subscription screen. Show concrete benefits already delivered (reports made, months of history built) — not just feature list.",
+    severity: 4
+  },
+  {
+    id: "pp-unexpected-charge",
+    product: "Perpay+",
+    theme: "Customer didn't know they were enrolled in Perpay+",
+    patterns: [/\bdidn'?t\s+sign\s+up\b/i, /\bdidn'?t\s+know.*charged\b/i, /\bwhy.*charged.*perpay\+/i, /\bnever\s+signed\s+up\b/i, /\bautomatic.*enroll/i],
+    recommendation: "Audit the Perpay+ enrollment surface. Ensure opt-in is explicit, clearly priced, and confirmed post-enrollment via email. Ambiguous enrollment is a major trust risk.",
+    severity: 5
+  },
+
+  // ─── CARD ───
+  {
+    id: "card-declined",
+    product: "Card",
+    theme: "Card declined unexpectedly at checkout",
+    patterns: [/\bcard\s+(?:was\s+)?declined\b/i, /\bdeclined.*(?:purchase|transaction|checkout)/i, /\bwhy.*declined\b/i, /\bkeeps\s+getting\s+declined\b/i],
+    recommendation: "In real-time push notifications on decline, include the specific reason (available credit, merchant category, fraud flag) and a direct in-app action to resolve it.",
+    severity: 5
+  },
+  {
+    id: "card-available-credit-wrong",
+    product: "Card",
+    theme: "Available credit doesn't match customer's expectation",
+    patterns: [/\bavailable\s+credit\b/i, /\bcredit.*(?:wrong|less|missing)/i, /\bshould\s+have\s+more.*credit\b/i, /\bpending.*credit\b/i, /\blimit.*doesn'?t\s+match/i],
+    recommendation: "Show a breakdown of available credit: limit, pending authorizations, posted transactions, and recent payments. Today customers can't reconcile why their available credit differs from their mental model.",
+    severity: 4
+  },
+  {
+    id: "card-activation",
+    product: "Card",
+    theme: "Difficulty activating new card",
+    patterns: [/\bactivat(?:e|ing)\s+(?:my\s+)?card\b/i, /\bcan'?t\s+activate\b/i, /\bcard.*not\s+working\s+yet\b/i, /\bnew\s+card.*(?:doesn'?t|not)\b/i],
+    recommendation: "Simplify activation to a single tap inside the app using the existing session. Remove reliance on web-based activation flows and separate CVV entry for most cases.",
+    severity: 3
+  },
+  {
+    id: "card-payment-not-posted",
+    product: "Card",
+    theme: "Payment made but not reflected on card balance",
+    patterns: [/\bpayment\s+(?:not|hasn'?t)\s+(?:post|reflect|show)/i, /\bmade\s+(?:a\s+)?payment.*(?:still|not)/i, /\bpayment.*(?:disappeared|missing)/i, /\bautopay.*not/i],
+    recommendation: "Show payment status explicitly: Scheduled / Processing / Posted / Available. Currently, payments appear to 'disappear' during the processing window, creating repeat contacts.",
+    severity: 4
+  },
+  {
+    id: "card-apr-interest-confusion",
+    product: "Card",
+    theme: "Confusion about interest charges or statement balance",
+    patterns: [/\binterest\s+(?:charge|fee)/i, /\bapr\b/i, /\bstatement\s+balance\b/i, /\bwhy.*interest\b/i, /\bdidn'?t\s+know.*interest\b/i],
+    recommendation: "Show an interest preview before statement close: 'Pay $X by [date] to avoid $Y in interest.' Make the grace-period mechanics visible instead of post-hoc.",
+    severity: 4
+  },
+  {
+    id: "card-limit-increase",
+    product: "Card",
+    theme: "Customers asking how to get a credit limit increase",
+    patterns: [/\blimit\s+increase\b/i, /\bincrease\s+(?:my\s+)?credit\s+limit\b/i, /\bhigher\s+limit\b/i, /\bhow.*raise.*limit\b/i],
+    recommendation: "Introduce a transparent, data-driven limit increase flow. Show customers what behaviors (on-time payments, tenure) trigger increases and when the next review happens.",
+    severity: 2
+  },
+];
+
+const PRODUCT_ORDER = ["Marketplace", "Core", "Perpay+", "Card"];
+
+const productColors = {
+  "Marketplace": { bg: "#ECFDF5", border: "#10B981", text: "#065F46", badge: "#10B981", icon: "\uD83D\uDED2" },
+  "Core":        { bg: "#EFF6FF", border: "#3B82F6", text: "#1E40AF", badge: "#3B82F6", icon: "\uD83D\uDCB3" },
+  "Perpay+":     { bg: "#EEF2FF", border: "#6366F1", text: "#4338CA", badge: "#6366F1", icon: "\uD83D\uDCC8" },
+  "Card":        { bg: "#FFF7ED", border: "#F59E0B", text: "#92400E", badge: "#F59E0B", icon: "\uD83D\uDCB3" }
 };
-
-const FRUSTRATION_SIGNALS = ["frustrated", "frustrating", "annoyed", "angry", "upset", "ridiculous", "terrible", "horrible", "worst", "hate", "unacceptable", "disappointed", "misleading", "scam", "rip off", "ripoff", "waste", "stealing", "stolen", "unfair", "make no sense", "doesn't make sense", "don't understand", "can't believe", "not fair", "bad experience", "poor", "awful", "disgusting"];
-
-const RETENTION_SIGNALS = ["cancel", "canceling", "cancelling", "close my account", "stop using", "leave", "switch to", "going to", "done with", "never again", "last time", "unsubscribe", "delete my account", "remove my account", "won't be using", "not worth"];
-
-const CONFUSION_SIGNALS = ["confused", "confusing", "don't understand", "doesn't make sense", "unclear", "why did", "why is", "why was", "how do i", "how come", "what does", "makes no sense", "no idea", "lost", "mixed up"];
-
-const FEATURE_SIGNALS = ["should be able to", "wish i could", "would be nice", "why can't i", "it would help", "you should add", "suggestion", "feature request", "missing", "need to be able", "expected to", "should have", "there should be"];
 
 // ─── Analysis Engine ───
 function analyzeConversations(rows, headerMap) {
-  const msgField = headerMap.message || headerMap.conversation || headerMap.text || headerMap.content || headerMap.body || headerMap.transcript || null;
-  const idField = headerMap.id || headerMap.conversation_id || headerMap.ticket_id || headerMap.case_id || null;
-  const dateField = headerMap.date || headerMap.created_at || headerMap.timestamp || headerMap.created || null;
+  const msgField = headerMap.message;
+  const idField = headerMap.id;
+  const dateField = headerMap.date;
 
   if (!msgField) return { error: "Could not find a message/conversation column. Please ensure your CSV has a column named 'message', 'conversation', 'text', 'content', 'body', or 'transcript'." };
 
-  const conversations = rows.map((row, idx) => {
-    const text = (row[msgField] || "").toLowerCase();
-    const original = row[msgField] || "";
+  const themeMap = {};
+  let totalRelevant = 0;
+
+  rows.forEach((row, idx) => {
+    const text = row[msgField] || "";
+    if (!text || text.length < 20) return;
+
     const id = idField ? row[idField] : `conv-${idx + 1}`;
     const date = dateField ? row[dateField] : null;
 
-    // Detect product area
-    let products = [];
-    for (const [product, keywords] of Object.entries(PRODUCT_KEYWORDS)) {
-      if (keywords.some(k => text.includes(k))) products.push(product);
+    // Split into sentences for targeted quote extraction
+    const sentences = text.split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(s => s.length > 10 && s.length < 300);
+
+    // Test each issue
+    let matched = false;
+    for (const issue of ISSUE_CATALOG) {
+      const isMatch = issue.patterns.some(p => p.test(text));
+      if (!isMatch) continue;
+      matched = true;
+
+      // Extract quotes: sentences that match the issue's own patterns (guaranteed on-theme)
+      const quotes = sentences.filter(s => issue.patterns.some(p => p.test(s))).slice(0, 2);
+
+      if (!themeMap[issue.id]) {
+        themeMap[issue.id] = {
+          ...issue,
+          conversations: [],
+          quotes: new Set()
+        };
+      }
+      themeMap[issue.id].conversations.push({ id, date, text, excerpt: text.slice(0, 280) });
+      quotes.forEach(q => themeMap[issue.id].quotes.add(q));
     }
-    if (products.length === 0) products = ["General"];
-
-    // Detect signals
-    const hasFrustration = FRUSTRATION_SIGNALS.some(s => text.includes(s));
-    const hasRetentionRisk = RETENTION_SIGNALS.some(s => text.includes(s));
-    const hasConfusion = CONFUSION_SIGNALS.some(s => text.includes(s));
-    const hasFeatureRequest = FEATURE_SIGNALS.some(s => text.includes(s));
-
-    const isRelevant = hasFrustration || hasRetentionRisk || hasConfusion || hasFeatureRequest;
-
-    // Extract potential quotes (sentences with signal words)
-    const sentences = original.split(/[.!?]+/).filter(s => s.trim().length > 15);
-    const quotable = sentences.filter(s => {
-      const lower = s.toLowerCase();
-      return [...FRUSTRATION_SIGNALS, ...RETENTION_SIGNALS, ...CONFUSION_SIGNALS, ...FEATURE_SIGNALS].some(sig => lower.includes(sig));
-    }).map(s => s.trim()).slice(0, 3);
-
-    return { id, date, text: original, products, hasFrustration, hasRetentionRisk, hasConfusion, hasFeatureRequest, isRelevant, quotes: quotable };
+    if (matched) totalRelevant++;
   });
 
-  const relevant = conversations.filter(c => c.isRelevant);
+  // Convert sets to arrays, compute frequency
+  const themes = Object.values(themeMap).map(t => {
+    const count = t.conversations.length;
+    const frequency = count >= 8 ? "High" : count >= 3 ? "Medium" : "Low";
+    return {
+      ...t,
+      quotes: Array.from(t.quotes).slice(0, 3),
+      count,
+      frequency
+    };
+  });
 
-  // Group by theme
-  const themes = [];
-
-  // Group by product + signal type
-  const productGroups = _.groupBy(relevant, c => c.products[0]);
-
-  for (const [product, convos] of Object.entries(productGroups)) {
-    const frustrationConvos = convos.filter(c => c.hasFrustration);
-    const retentionConvos = convos.filter(c => c.hasRetentionRisk);
-    const confusionConvos = convos.filter(c => c.hasConfusion);
-    const featureConvos = convos.filter(c => c.hasFeatureRequest);
-
-    if (frustrationConvos.length > 0) {
-      const allQuotes = frustrationConvos.flatMap(c => c.quotes).slice(0, 4);
-      themes.push({
-        title: `${product}: Customer Frustration with Product Experience`,
-        product,
-        type: "frustration",
-        summary: `${frustrationConvos.length} conversation(s) show customers expressing frustration with the ${product} experience. These signals indicate friction points that could erode trust and satisfaction over time.`,
-        quotes: allQuotes,
-        conversations: frustrationConvos,
-        frequency: frustrationConvos.length >= 5 ? "High" : frustrationConvos.length >= 2 ? "Medium" : "Low",
-        severity: 4,
-        retentionRisk: retentionConvos.length > 0 ? "Yes" : "Moderate"
-      });
-    }
-
-    if (retentionConvos.length > 0) {
-      const allQuotes = retentionConvos.flatMap(c => c.quotes).slice(0, 4);
-      themes.push({
-        title: `${product}: Active Retention Risk — Customers Considering Leaving`,
-        product,
-        type: "retention",
-        summary: `${retentionConvos.length} conversation(s) contain signals that customers are considering cancellation or reducing usage of ${product}. This is a high-priority retention concern.`,
-        quotes: allQuotes,
-        conversations: retentionConvos,
-        frequency: retentionConvos.length >= 5 ? "High" : retentionConvos.length >= 2 ? "Medium" : "Low",
-        severity: 5,
-        retentionRisk: "High"
-      });
-    }
-
-    if (confusionConvos.length > 0) {
-      const allQuotes = confusionConvos.flatMap(c => c.quotes).slice(0, 4);
-      themes.push({
-        title: `${product}: UX Confusion and Lack of Clarity`,
-        product,
-        type: "confusion",
-        summary: `${confusionConvos.length} conversation(s) reveal customers who are confused by ${product} functionality, flows, or messaging. Improving clarity could reduce support volume and increase activation.`,
-        quotes: allQuotes,
-        conversations: confusionConvos,
-        frequency: confusionConvos.length >= 5 ? "High" : confusionConvos.length >= 2 ? "Medium" : "Low",
-        severity: 3,
-        retentionRisk: "Moderate"
-      });
-    }
-
-    if (featureConvos.length > 0) {
-      const allQuotes = featureConvos.flatMap(c => c.quotes).slice(0, 4);
-      themes.push({
-        title: `${product}: Feature Gaps and Product Opportunities`,
-        product,
-        type: "feature",
-        summary: `${featureConvos.length} conversation(s) suggest missing features or improvements for ${product}. These represent opportunities to increase product value and differentiation.`,
-        quotes: allQuotes,
-        conversations: featureConvos,
-        frequency: featureConvos.length >= 5 ? "High" : featureConvos.length >= 2 ? "Medium" : "Low",
-        severity: 2,
-        retentionRisk: "Low"
-      });
-    }
-  }
-
-  // Sort by severity * frequency score
+  // Sort within each product by severity × frequency
   const freqScore = { High: 3, Medium: 2, Low: 1 };
-  themes.sort((a, b) => (b.severity * freqScore[b.frequency]) - (a.severity * freqScore[a.frequency]));
+  themes.sort((a, b) => (b.severity * freqScore[b.frequency] * b.count) - (a.severity * freqScore[a.frequency] * a.count));
 
   const top5 = themes.slice(0, 5);
 
+  // Group by product
+  const byProduct = {};
+  PRODUCT_ORDER.forEach(p => byProduct[p] = []);
+  themes.forEach(t => { if (byProduct[t.product]) byProduct[t.product].push(t); });
+
   return {
-    total: conversations.length,
-    relevant: relevant.length,
-    filtered: conversations.length - relevant.length,
+    total: rows.length,
+    relevant: totalRelevant,
+    filtered: rows.length - totalRelevant,
     themes,
+    byProduct,
     top5,
-    conversations: relevant,
     analysisDate: new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })
   };
 }
 
-// ─── Recommendation generator ───
-function getRecommendation(theme) {
-  const recs = {
-    "Perpay+_frustration": "Audit the Perpay+ onboarding flow and credit reporting timelines. Add proactive status updates so customers know exactly when and how their credit is being impacted. Consider adding a credit score tracker within the app.",
-    "Perpay+_retention": "Implement a targeted retention flow for Perpay+ subscribers showing cancellation intent. Highlight accumulated credit-building progress and what they'd lose. Offer a discounted retention period.",
-    "Perpay+_confusion": "Redesign Perpay+ value proposition messaging in-app. Create a clear FAQ section and tooltip system explaining how credit reporting works, expected timelines, and what to expect on their credit report.",
-    "Perpay+_feature": "Evaluate adding real-time credit score monitoring, bureau dispute assistance, or enhanced reporting (all 3 bureaus) as premium features to increase Perpay+ perceived value.",
-    "Marketplace_frustration": "Review the end-to-end Marketplace checkout and approval flow. Identify where customers drop off or express friction and redesign those steps. Consider clearer pricing breakdowns and approval criteria.",
-    "Marketplace_retention": "Analyze Marketplace churn triggers. Implement post-purchase satisfaction surveys and address top complaints. Consider a loyalty or rewards program to increase stickiness.",
-    "Marketplace_confusion": "Simplify Marketplace approval messaging, spending limit explanations, and order status flows. Add contextual help and clearer error states throughout the shopping experience.",
-    "Marketplace_feature": "Evaluate top-requested Marketplace features (e.g., wider product selection, price matching, wishlists, payment flexibility). Prioritize based on customer demand and implementation effort.",
-    "Card_frustration": "Investigate top decline reasons and transaction failure patterns. Improve real-time decline messaging so customers understand why a transaction failed and how to resolve it.",
-    "Card_retention": "Build proactive alerts for Card users at risk of churning. Address the most common complaints (unexpected declines, limit confusion, billing issues) with targeted UX improvements.",
-    "Card_confusion": "Redesign the Card dashboard to clearly display available credit, billing cycle, payment due dates, and transaction history. Add educational tooltips for APR, interest, and statement concepts.",
-    "Card_feature": "Explore adding instant spend notifications, virtual card numbers, customizable spending limits, and autopay enhancements to make the Card more competitive.",
-    "General_frustration": "Conduct a UX audit of cross-product account management flows (login, verification, support). Streamline the most frustrating touchpoints identified in customer conversations.",
-    "General_retention": "Implement a unified customer health scoring system across products. Flag at-risk customers and trigger proactive outreach or retention offers before they churn.",
-    "General_confusion": "Create a unified help center with product-specific guides, video tutorials, and contextual in-app assistance. Reduce dependency on support for common questions.",
-    "General_feature": "Evaluate cross-product feature requests and identify opportunities for deeper integration between Perpay+, Marketplace, and Card to create a more cohesive ecosystem."
-  };
-  const key = `${theme.product}_${theme.type}`;
-  return recs[key] || "Investigate this theme further with targeted user research and prioritize based on impact and effort.";
+// ─── UI components ───
+const freqColors = { High: "#DC2626", Medium: "#F59E0B", Low: "#6B7280" };
+
+function Badge({ label, color, bg }) {
+  return <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 12, fontSize: 11, fontWeight: 600, color, background: bg, whiteSpace: "nowrap" }}>{label}</span>;
 }
 
-// ─── Color + styling helpers ───
-const productColors = {
-  "Perpay+": { bg: "#EEF2FF", border: "#6366F1", text: "#4338CA", badge: "#6366F1" },
-  "Marketplace": { bg: "#ECFDF5", border: "#10B981", text: "#065F46", badge: "#10B981" },
-  "Card": { bg: "#FFF7ED", border: "#F59E0B", text: "#92400E", badge: "#F59E0B" },
-  "General": { bg: "#F5F3FF", border: "#8B5CF6", text: "#5B21B6", badge: "#8B5CF6" }
-};
-
-const freqColors = { High: "#EF4444", Medium: "#F59E0B", Low: "#6B7280" };
-const typeIcons = { frustration: "\u26A0\uFE0F", retention: "\uD83D\uDEA8", confusion: "\u2753", feature: "\uD83D\uDCA1" };
-
-// ─── Components ───
-
-function FrequencyBadge({ freq }) {
-  return (
-    <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 12, fontSize: 12, fontWeight: 600, color: "#fff", background: freqColors[freq] || "#6B7280" }}>
-      {freq} Frequency
-    </span>
-  );
-}
-
-function ProductBadge({ product }) {
-  const c = productColors[product] || productColors.General;
-  return (
-    <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 12, fontSize: 12, fontWeight: 600, color: "#fff", background: c.badge }}>
-      {product}
-    </span>
-  );
-}
-
-function ThemeCard({ theme, index, isTop5, onViewConversations }) {
+function ThemeCard({ theme, rank }) {
   const [expanded, setExpanded] = useState(false);
-  const c = productColors[theme.product] || productColors.General;
+  const c = productColors[theme.product];
 
   return (
-    <div style={{ background: "#fff", borderRadius: 12, border: `1px solid ${c.border}22`, boxShadow: "0 1px 3px rgba(0,0,0,0.06)", marginBottom: 16, overflow: "hidden" }}>
-      <div style={{ borderLeft: `4px solid ${c.border}`, padding: "20px 24px" }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-              {isTop5 && <span style={{ background: "#DC2626", color: "#fff", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 700 }}>#{index + 1} CRITICAL</span>}
-              <ProductBadge product={theme.product} />
-              <FrequencyBadge freq={theme.frequency} />
-              <span style={{ fontSize: 12, color: "#6B7280" }}>{typeIcons[theme.type]} {theme.type.charAt(0).toUpperCase() + theme.type.slice(1)}</span>
-            </div>
-            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: "#111827", lineHeight: 1.4 }}>{theme.title}</h3>
+    <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E5E7EB", borderLeft: `4px solid ${c.border}`, marginBottom: 12, padding: "16px 20px", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 250 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+            {rank && <Badge label={`#${rank} CRITICAL`} color="#fff" bg="#DC2626" />}
+            <Badge label={theme.frequency} color="#fff" bg={freqColors[theme.frequency]} />
+            <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 500 }}>{theme.count} conversation{theme.count !== 1 ? "s" : ""}</span>
           </div>
-          <div style={{ textAlign: "right", minWidth: 100 }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: c.border }}>{theme.conversations.length}</div>
-            <div style={{ fontSize: 11, color: "#6B7280", marginTop: -2 }}>conversations</div>
-          </div>
+          <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#111827", lineHeight: 1.35 }}>{theme.theme}</h4>
         </div>
-
-        <p style={{ margin: "12px 0", fontSize: 14, color: "#374151", lineHeight: 1.6 }}>{theme.summary}</p>
-
-        {theme.quotes.length > 0 && (
-          <div style={{ margin: "12px 0" }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#6B7280", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>Customer Signals</div>
-            {theme.quotes.map((q, i) => (
-              <div key={i} style={{ background: c.bg, borderLeft: `3px solid ${c.border}`, padding: "8px 12px", marginBottom: 6, borderRadius: "0 6px 6px 0", fontSize: 13, color: "#374151", fontStyle: "italic", lineHeight: 1.5 }}>
-                "{q}"
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 8, padding: "12px 16px", margin: "12px 0" }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: "#166534", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>Recommendation</div>
-          <div style={{ fontSize: 13, color: "#15803D", lineHeight: 1.5 }}>{getRecommendation(theme)}</div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, color: "#6B7280" }}>Retention Risk: <strong style={{ color: theme.retentionRisk === "High" ? "#DC2626" : theme.retentionRisk === "Yes" ? "#DC2626" : "#F59E0B" }}>{theme.retentionRisk}</strong></span>
-          <button onClick={() => setExpanded(!expanded)} style={{ background: "none", border: `1px solid ${c.border}44`, borderRadius: 6, padding: "4px 12px", fontSize: 12, color: c.text, cursor: "pointer", fontWeight: 500 }}>
-            {expanded ? "Hide" : "View"} Conversations ({theme.conversations.length})
-          </button>
-          {onViewConversations && (
-            <button onClick={() => onViewConversations(theme)} style={{ background: "none", border: "1px solid #D1D5DB", borderRadius: 6, padding: "4px 12px", fontSize: 12, color: "#374151", cursor: "pointer" }}>
-              Flag for PM Review
-            </button>
-          )}
-        </div>
-
-        {expanded && (
-          <div style={{ marginTop: 12, maxHeight: 300, overflowY: "auto", border: "1px solid #E5E7EB", borderRadius: 8 }}>
-            {theme.conversations.map((conv, i) => (
-              <div key={i} style={{ padding: "10px 14px", borderBottom: "1px solid #F3F4F6", fontSize: 13, color: "#374151", lineHeight: 1.5 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                  <span style={{ fontWeight: 600, color: "#111827", fontSize: 12 }}>ID: {conv.id}</span>
-                  {conv.date && <span style={{ fontSize: 11, color: "#9CA3AF" }}>{conv.date}</span>}
-                </div>
-                <div style={{ maxHeight: 80, overflow: "hidden", textOverflow: "ellipsis" }}>{conv.text.slice(0, 300)}{conv.text.length > 300 ? "..." : ""}</div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
+
+      {theme.quotes.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          {theme.quotes.map((q, i) => (
+            <div key={i} style={{ background: c.bg, borderLeft: `3px solid ${c.border}`, padding: "6px 12px", marginBottom: 4, borderRadius: "0 6px 6px 0", fontSize: 12, color: "#374151", fontStyle: "italic", lineHeight: 1.5 }}>
+              "{q}"
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 6, padding: "8px 12px", marginTop: 10 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#166534", marginBottom: 2, textTransform: "uppercase", letterSpacing: 0.5 }}>Recommendation</div>
+        <div style={{ fontSize: 12, color: "#15803D", lineHeight: 1.5 }}>{theme.recommendation}</div>
+      </div>
+
+      <button onClick={() => setExpanded(!expanded)} style={{ marginTop: 10, background: "none", border: `1px solid ${c.border}44`, borderRadius: 6, padding: "3px 10px", fontSize: 11, color: c.text, cursor: "pointer", fontWeight: 500 }}>
+        {expanded ? "Hide" : "View"} {theme.count} source conversation{theme.count !== 1 ? "s" : ""}
+      </button>
+
+      {expanded && (
+        <div style={{ marginTop: 10, maxHeight: 280, overflowY: "auto", border: "1px solid #E5E7EB", borderRadius: 6 }}>
+          {theme.conversations.map((conv, i) => (
+            <div key={i} style={{ padding: "8px 12px", borderBottom: i < theme.conversations.length - 1 ? "1px solid #F3F4F6" : "none", fontSize: 12, color: "#374151", lineHeight: 1.5 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                <span style={{ fontWeight: 600, color: "#111827", fontSize: 11 }}>ID: {conv.id}</span>
+                {conv.date && <span style={{ fontSize: 10, color: "#9CA3AF" }}>{conv.date}</span>}
+              </div>
+              <div>{conv.excerpt}{conv.text.length > 280 ? "..." : ""}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductSection({ product, themes }) {
+  const c = productColors[product];
+  if (themes.length === 0) {
+    return (
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, paddingBottom: 8, borderBottom: `2px solid ${c.border}33` }}>
+          <span style={{ fontSize: 22 }}>{c.icon}</span>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: c.text }}>{product}</h3>
+          <Badge label="0 themes" color="#fff" bg="#9CA3AF" />
+        </div>
+        <div style={{ fontSize: 12, color: "#9CA3AF", padding: "8px 0" }}>No actionable themes detected in this batch.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, paddingBottom: 10, borderBottom: `2px solid ${c.border}55` }}>
+        <span style={{ fontSize: 22 }}>{c.icon}</span>
+        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: c.text }}>{product}</h3>
+        <Badge label={`${themes.length} theme${themes.length !== 1 ? "s" : ""}`} color="#fff" bg={c.badge} />
+        <span style={{ fontSize: 12, color: "#6B7280", marginLeft: "auto" }}>
+          {themes.reduce((s, t) => s + t.count, 0)} conversations
+        </span>
+      </div>
+      {themes.map((t, i) => <ThemeCard key={t.id} theme={t} />)}
     </div>
   );
 }
@@ -311,21 +401,14 @@ function UploadTab({ onAnalyze, isAnalyzing }) {
 
   const handleFile = useCallback((file) => {
     if (!file) return;
-    if (!file.name.endsWith(".csv")) {
-      setError("Please upload a CSV file.");
-      return;
-    }
+    if (!file.name.endsWith(".csv")) { setError("Please upload a CSV file."); return; }
     setFileName(file.name);
     setError(null);
 
     Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
+      header: true, skipEmptyLines: true,
       complete: (results) => {
-        if (results.errors.length > 0 && results.data.length === 0) {
-          setError("Failed to parse CSV. Please check the file format.");
-          return;
-        }
+        if (results.errors.length > 0 && results.data.length === 0) { setError("Failed to parse CSV."); return; }
         const headers = results.meta.fields || [];
         const headerMap = {};
         headers.forEach(h => {
@@ -341,28 +424,21 @@ function UploadTab({ onAnalyze, isAnalyzing }) {
   }, [onAnalyze, weekLabel]);
 
   const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    handleFile(file);
+    e.preventDefault(); setDragOver(false);
+    handleFile(e.dataTransfer.files[0]);
   }, [handleFile]);
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto", padding: "40px 20px" }}>
       <div style={{ textAlign: "center", marginBottom: 32 }}>
         <h2 style={{ fontSize: 24, fontWeight: 700, color: "#111827", margin: 0 }}>Upload Conversations</h2>
-        <p style={{ color: "#6B7280", fontSize: 14, marginTop: 8 }}>Upload your Decagon AI support conversation CSV to generate product insights.</p>
+        <p style={{ color: "#6B7280", fontSize: 14, marginTop: 8 }}>Upload your Decagon AI support conversation CSV to generate product-specific insights.</p>
       </div>
 
       <div style={{ marginBottom: 20 }}>
         <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Week Label</label>
-        <input
-          type="text"
-          value={weekLabel}
-          onChange={(e) => setWeekLabel(e.target.value)}
-          style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #D1D5DB", fontSize: 14, color: "#111827", boxSizing: "border-box", outline: "none" }}
-          placeholder="e.g., Week of Apr 7, 2026"
-        />
+        <input type="text" value={weekLabel} onChange={(e) => setWeekLabel(e.target.value)}
+          style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid #D1D5DB", fontSize: 14, color: "#111827", boxSizing: "border-box", outline: "none" }} />
       </div>
 
       <div
@@ -370,31 +446,14 @@ function UploadTab({ onAnalyze, isAnalyzing }) {
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
         onClick={() => fileRef.current?.click()}
-        style={{
-          border: `2px dashed ${dragOver ? "#6366F1" : "#D1D5DB"}`,
-          borderRadius: 12,
-          padding: "48px 24px",
-          textAlign: "center",
-          cursor: "pointer",
-          background: dragOver ? "#EEF2FF" : "#FAFAFA",
-          transition: "all 0.2s"
-        }}
-      >
+        style={{ border: `2px dashed ${dragOver ? "#6366F1" : "#D1D5DB"}`, borderRadius: 12, padding: "48px 24px", textAlign: "center", cursor: "pointer", background: dragOver ? "#EEF2FF" : "#FAFAFA", transition: "all 0.2s" }}>
         <input ref={fileRef} type="file" accept=".csv" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
         <div style={{ fontSize: 40, marginBottom: 12 }}>{fileName ? "\u2705" : "\uD83D\uDCC1"}</div>
-        <div style={{ fontSize: 15, fontWeight: 600, color: "#374151" }}>
-          {fileName ? fileName : "Drop your CSV here or click to browse"}
-        </div>
-        <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 6 }}>
-          Supports .csv files exported from Decagon
-        </div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: "#374151" }}>{fileName || "Drop your CSV here or click to browse"}</div>
+        <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 6 }}>Supports .csv exported from Decagon</div>
       </div>
 
-      {error && (
-        <div style={{ marginTop: 16, padding: "12px 16px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, color: "#DC2626", fontSize: 13 }}>
-          {error}
-        </div>
-      )}
+      {error && <div style={{ marginTop: 16, padding: "12px 16px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, color: "#DC2626", fontSize: 13 }}>{error}</div>}
 
       {isAnalyzing && (
         <div style={{ marginTop: 24, textAlign: "center" }}>
@@ -404,9 +463,9 @@ function UploadTab({ onAnalyze, isAnalyzing }) {
       )}
 
       <div style={{ marginTop: 32, padding: "20px 24px", background: "#F9FAFB", borderRadius: 10, border: "1px solid #E5E7EB" }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>Expected CSV Format</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>How matching works</div>
         <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6 }}>
-          Your CSV should contain columns such as: <strong>id</strong> (or conversation_id), <strong>message</strong> (or conversation, text, content, transcript), and optionally <strong>date</strong> (or created_at, timestamp). The analysis engine will auto-detect column names.
+          Each conversation is matched against a catalog of specific product issues (e.g., "card declined unexpectedly", "credit score not reporting"). A theme only appears if the conversation contains language evidencing that specific problem. Quotes shown under a theme come from sentences that directly match its patterns.
         </div>
       </div>
     </div>
@@ -414,7 +473,7 @@ function UploadTab({ onAnalyze, isAnalyzing }) {
 }
 
 // ─── Insights Tab ───
-function InsightsTab({ analysis, onSaveToArchive, flaggedThemes, onFlag }) {
+function InsightsTab({ analysis, onSaveToArchive }) {
   const [filter, setFilter] = useState("All");
   const [saved, setSaved] = useState(false);
 
@@ -423,13 +482,10 @@ function InsightsTab({ analysis, onSaveToArchive, flaggedThemes, onFlag }) {
       <div style={{ textAlign: "center", padding: "80px 20px", color: "#9CA3AF" }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>{"\uD83D\uDCCA"}</div>
         <div style={{ fontSize: 16, fontWeight: 500 }}>No analysis yet</div>
-        <div style={{ fontSize: 14, marginTop: 4 }}>Upload a CSV in the Upload tab to generate insights.</div>
+        <div style={{ fontSize: 14, marginTop: 4 }}>Upload a CSV in the Upload tab.</div>
       </div>
     );
   }
-
-  const products = ["All", "Perpay+", "Marketplace", "Card", "General"];
-  const filtered = filter === "All" ? analysis.themes : analysis.themes.filter(t => t.product === filter);
 
   const handleSave = () => {
     onSaveToArchive();
@@ -437,88 +493,48 @@ function InsightsTab({ analysis, onSaveToArchive, flaggedThemes, onFlag }) {
     setTimeout(() => setSaved(false), 3000);
   };
 
+  const filters = ["All", ...PRODUCT_ORDER];
+
   return (
     <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 20px" }}>
-      {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Product Insights Report</h2>
-          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>{analysis.analysisDate} &middot; {analysis.total} total conversations &middot; {analysis.relevant} actionable &middot; {analysis.filtered} filtered out</p>
+          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>{analysis.analysisDate} &middot; {analysis.total} total &middot; {analysis.relevant} actionable &middot; {analysis.themes.length} themes</p>
         </div>
-        <button onClick={handleSave} style={{ background: saved ? "#10B981" : "#6366F1", color: "#fff", border: "none", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "background 0.2s" }}>
+        <button onClick={handleSave} style={{ background: saved ? "#10B981" : "#6366F1", color: "#fff", border: "none", borderRadius: 8, padding: "10px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
           {saved ? "\u2713 Saved to Archive" : "Save to Archive"}
         </button>
       </div>
 
-      {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 28 }}>
-        {[
-          { label: "Total Conversations", value: analysis.total, color: "#6366F1" },
-          { label: "Actionable Insights", value: analysis.relevant, color: "#10B981" },
-          { label: "Themes Identified", value: analysis.themes.length, color: "#F59E0B" },
-          { label: "Retention Risks", value: analysis.themes.filter(t => t.type === "retention").reduce((s, t) => s + t.conversations.length, 0), color: "#EF4444" }
-        ].map((s, i) => (
-          <div key={i} style={{ background: "#fff", borderRadius: 10, padding: "16px 18px", border: "1px solid #E5E7EB", textAlign: "center" }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: s.color }}>{s.value}</div>
-            <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2, fontWeight: 500 }}>{s.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Top 5 Critical */}
+      {/* Top 5 critical */}
       {analysis.top5.length > 0 && (
-        <div style={{ background: "#FEF2F2", borderRadius: 12, padding: "20px 24px", marginBottom: 28, border: "1px solid #FECACA" }}>
-          <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700, color: "#991B1B" }}>{"\uD83D\uDEA8"} Top 5 Most Critical Insights</h3>
-          {analysis.top5.map((theme, i) => (
-            <ThemeCard key={i} theme={theme} index={i} isTop5={true} onViewConversations={onFlag} />
-          ))}
+        <div style={{ background: "#FEF2F2", borderRadius: 12, padding: "18px 22px", marginBottom: 28, border: "1px solid #FECACA" }}>
+          <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 800, color: "#991B1B" }}>{"\uD83D\uDEA8"} Top 5 Most Critical Insights</h3>
+          {analysis.top5.map((theme, i) => <ThemeCard key={theme.id} theme={theme} rank={i + 1} />)}
         </div>
       )}
 
-      {/* Filter bar */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
-        {products.map(p => (
-          <button
-            key={p}
-            onClick={() => setFilter(p)}
-            style={{
-              padding: "6px 16px",
-              borderRadius: 20,
-              border: filter === p ? "none" : "1px solid #D1D5DB",
-              background: filter === p ? "#6366F1" : "#fff",
-              color: filter === p ? "#fff" : "#374151",
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: "pointer",
-              transition: "all 0.15s"
-            }}
-          >
-            {p} {p !== "All" && `(${analysis.themes.filter(t => t.product === p).length})`}
-          </button>
-        ))}
+      {/* Product filter */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
+        {filters.map(p => {
+          const count = p === "All" ? analysis.themes.length : (analysis.byProduct[p]?.length || 0);
+          return (
+            <button key={p} onClick={() => setFilter(p)}
+              style={{ padding: "6px 14px", borderRadius: 20, border: filter === p ? "none" : "1px solid #D1D5DB",
+                background: filter === p ? (productColors[p]?.badge || "#6366F1") : "#fff",
+                color: filter === p ? "#fff" : "#374151", fontSize: 13, fontWeight: 500, cursor: "pointer" }}>
+              {p} ({count})
+            </button>
+          );
+        })}
       </div>
 
-      {/* All Themes */}
-      <h3 style={{ fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 16 }}>
-        {filter === "All" ? "All Themes" : `${filter} Themes`} ({filtered.length})
-      </h3>
-      {filtered.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "40px 20px", color: "#9CA3AF", fontSize: 14 }}>No themes found for this filter.</div>
-      ) : (
-        filtered.map((theme, i) => <ThemeCard key={i} theme={theme} index={i} isTop5={false} onViewConversations={onFlag} />)
-      )}
-
-      {/* Flagged */}
-      {flaggedThemes.length > 0 && (
-        <div style={{ marginTop: 32, padding: "20px 24px", background: "#FFFBEB", borderRadius: 12, border: "1px solid #FDE68A" }}>
-          <h3 style={{ margin: "0 0 12px", fontSize: 15, fontWeight: 700, color: "#92400E" }}>{"\uD83D\uDCCC"} Flagged for PM Review ({flaggedThemes.length})</h3>
-          {flaggedThemes.map((t, i) => (
-            <div key={i} style={{ padding: "8px 0", borderBottom: i < flaggedThemes.length - 1 ? "1px solid #FDE68A" : "none", fontSize: 13, color: "#78350F" }}>
-              <ProductBadge product={t.product} /> <span style={{ marginLeft: 8 }}>{t.title}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Product-first breakdown */}
+      <h3 style={{ fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 16 }}>Themes by Product</h3>
+      {PRODUCT_ORDER.filter(p => filter === "All" || filter === p).map(p => (
+        <ProductSection key={p} product={p} themes={analysis.byProduct[p] || []} />
+      ))}
     </div>
   );
 }
@@ -527,88 +543,57 @@ function InsightsTab({ analysis, onSaveToArchive, flaggedThemes, onFlag }) {
 function ArchiveTab({ archives, onDelete }) {
   const [expandedIdx, setExpandedIdx] = useState(null);
 
-  const downloadArchive = (archive) => {
+  const downloadReport = (archive) => {
     const lines = [];
     lines.push(`PERPAY PRODUCT INSIGHTS REPORT`);
     lines.push(`${archive.weekLabel}`);
     lines.push(`Generated: ${archive.analysis.analysisDate}`);
-    lines.push(`${"=".repeat(60)}`);
+    lines.push("=".repeat(60));
+    lines.push(`SUMMARY: ${archive.analysis.total} total | ${archive.analysis.relevant} actionable | ${archive.analysis.themes.length} themes`);
     lines.push("");
-    lines.push(`SUMMARY: ${archive.analysis.total} total conversations | ${archive.analysis.relevant} actionable | ${archive.analysis.themes.length} themes identified`);
-    lines.push("");
-    lines.push(`${"=".repeat(60)}`);
+    lines.push("=".repeat(60));
     lines.push("TOP 5 MOST CRITICAL INSIGHTS");
-    lines.push(`${"=".repeat(60)}`);
+    lines.push("=".repeat(60));
     archive.analysis.top5.forEach((t, i) => {
-      lines.push("");
-      lines.push(`#${i + 1} — ${t.title}`);
-      lines.push(`Product Area: ${t.product}`);
-      lines.push(`Frequency: ${t.frequency} | Retention Risk: ${t.retentionRisk}`);
-      lines.push(`Summary: ${t.summary}`);
-      if (t.quotes.length > 0) {
-        lines.push("Customer Signals:");
-        t.quotes.forEach(q => lines.push(`  > "${q}"`));
-      }
-      lines.push(`Recommendation: ${getRecommendation(t)}`);
+      lines.push(`\n#${i + 1} [${t.product}] ${t.theme}`);
+      lines.push(`Frequency: ${t.frequency} (${t.count} conversations)`);
+      if (t.quotes.length > 0) { lines.push("Quotes:"); t.quotes.forEach(q => lines.push(`  > "${q}"`)); }
+      lines.push(`Recommendation: ${t.recommendation}`);
     });
 
-    lines.push("");
-    lines.push(`${"=".repeat(60)}`);
-    lines.push("ALL THEMES");
-    lines.push(`${"=".repeat(60)}`);
-    archive.analysis.themes.forEach((t, i) => {
-      lines.push("");
-      lines.push(`--- Theme ${i + 1}: ${t.title} ---`);
-      lines.push(`Product Area: ${t.product}`);
-      lines.push(`Type: ${t.type} | Frequency: ${t.frequency} | Retention Risk: ${t.retentionRisk}`);
-      lines.push(`Conversations: ${t.conversations.length}`);
-      lines.push(`Summary: ${t.summary}`);
-      if (t.quotes.length > 0) {
-        lines.push("Customer Signals:");
-        t.quotes.forEach(q => lines.push(`  > "${q}"`));
-      }
-      lines.push(`Recommendation: ${getRecommendation(t)}`);
-    });
-
-    if (archive.flagged && archive.flagged.length > 0) {
-      lines.push("");
-      lines.push(`${"=".repeat(60)}`);
-      lines.push("FLAGGED FOR PM REVIEW");
-      lines.push(`${"=".repeat(60)}`);
-      archive.flagged.forEach((t, i) => {
-        lines.push(`${i + 1}. [${t.product}] ${t.title}`);
+    PRODUCT_ORDER.forEach(product => {
+      const themes = archive.analysis.byProduct[product] || [];
+      if (themes.length === 0) return;
+      lines.push("\n" + "=".repeat(60));
+      lines.push(product.toUpperCase());
+      lines.push("=".repeat(60));
+      themes.forEach((t, i) => {
+        lines.push(`\n${i + 1}. ${t.theme}`);
+        lines.push(`Frequency: ${t.frequency} (${t.count} conversations)`);
+        if (t.quotes.length > 0) { lines.push("Quotes:"); t.quotes.forEach(q => lines.push(`  > "${q}"`)); }
+        lines.push(`Recommendation: ${t.recommendation}`);
       });
-    }
+    });
 
     const blob = new Blob([lines.join("\n")], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `perpay-insights-${archive.weekLabel.replace(/\s+/g, "-").toLowerCase()}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    a.href = url; a.download = `perpay-insights-${archive.weekLabel.replace(/\s+/g, "-").toLowerCase()}.txt`;
+    a.click(); URL.revokeObjectURL(url);
   };
 
   const downloadCSV = (archive) => {
     const rows = archive.analysis.themes.map(t => ({
-      "Theme": t.title,
-      "Product Area": t.product,
-      "Type": t.type,
-      "Frequency": t.frequency,
-      "Retention Risk": t.retentionRisk,
-      "Conversations": t.conversations.length,
-      "Summary": t.summary,
-      "Top Quote": t.quotes[0] || "",
-      "Recommendation": getRecommendation(t)
+      "Product": t.product, "Theme": t.theme, "Frequency": t.frequency, "Conversations": t.count,
+      "Quote 1": t.quotes[0] || "", "Quote 2": t.quotes[1] || "",
+      "Recommendation": t.recommendation
     }));
     const csv = Papa.unparse(rows);
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `perpay-insights-${archive.weekLabel.replace(/\s+/g, "-").toLowerCase()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    a.href = url; a.download = `perpay-insights-${archive.weekLabel.replace(/\s+/g, "-").toLowerCase()}.csv`;
+    a.click(); URL.revokeObjectURL(url);
   };
 
   if (archives.length === 0) {
@@ -616,7 +601,7 @@ function ArchiveTab({ archives, onDelete }) {
       <div style={{ textAlign: "center", padding: "80px 20px", color: "#9CA3AF" }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>{"\uD83D\uDDC3\uFE0F"}</div>
         <div style={{ fontSize: 16, fontWeight: 500 }}>Archive is empty</div>
-        <div style={{ fontSize: 14, marginTop: 4 }}>Analyze a CSV and save it from the Insights tab to start building your week-over-week archive.</div>
+        <div style={{ fontSize: 14, marginTop: 4 }}>Save an analysis from the Insights tab to start the archive.</div>
       </div>
     );
   }
@@ -625,98 +610,49 @@ function ArchiveTab({ archives, onDelete }) {
     <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 20px" }}>
       <div style={{ marginBottom: 24 }}>
         <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Insights Archive</h2>
-        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>{archives.length} saved report{archives.length !== 1 ? "s" : ""} for week-over-week executive review</p>
+        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>{archives.length} saved report{archives.length !== 1 ? "s" : ""} for week-over-week review</p>
       </div>
 
-      {/* Trend comparison if 2+ archives */}
       {archives.length >= 2 && (
-        <div style={{ background: "#EEF2FF", borderRadius: 12, padding: "20px 24px", marginBottom: 24, border: "1px solid #C7D2FE" }}>
-          <h3 style={{ margin: "0 0 12px", fontSize: 15, fontWeight: 700, color: "#4338CA" }}>Week-over-Week Comparison</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
-            {archives.slice(0, 4).map((a, i) => {
-              const prev = archives[i + 1];
-              const retRisk = a.analysis.themes.filter(t => t.type === "retention").reduce((s, t) => s + t.conversations.length, 0);
-              const prevRetRisk = prev ? prev.analysis.themes.filter(t => t.type === "retention").reduce((s, t) => s + t.conversations.length, 0) : null;
-              const delta = prevRetRisk !== null ? retRisk - prevRetRisk : null;
-
-              return (
-                <div key={i} style={{ background: "#fff", borderRadius: 8, padding: "14px 16px", border: "1px solid #E5E7EB" }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#6366F1", marginBottom: 6 }}>{a.weekLabel}</div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#374151", marginBottom: 4 }}>
-                    <span>Actionable</span>
-                    <strong>{a.analysis.relevant}</strong>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#374151", marginBottom: 4 }}>
-                    <span>Themes</span>
-                    <strong>{a.analysis.themes.length}</strong>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#374151" }}>
-                    <span>Retention Risks</span>
-                    <span>
-                      <strong>{retRisk}</strong>
-                      {delta !== null && (
-                        <span style={{ marginLeft: 4, color: delta > 0 ? "#EF4444" : delta < 0 ? "#10B981" : "#6B7280", fontSize: 11 }}>
-                          {delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : "="}
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+        <div style={{ background: "#EEF2FF", borderRadius: 12, padding: "18px 22px", marginBottom: 24, border: "1px solid #C7D2FE" }}>
+          <h3 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: "#4338CA" }}>Week-over-Week Trend</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+            {archives.slice(0, 4).map((a, i) => (
+              <div key={i} style={{ background: "#fff", borderRadius: 8, padding: "12px 14px", border: "1px solid #E5E7EB" }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "#6366F1", marginBottom: 6 }}>{a.weekLabel}</div>
+                {PRODUCT_ORDER.map(p => {
+                  const count = (a.analysis.byProduct[p] || []).reduce((s, t) => s + t.count, 0);
+                  return <div key={p} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#374151", marginBottom: 2 }}><span>{p}</span><strong>{count}</strong></div>;
+                })}
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* Archive list */}
       {archives.map((archive, idx) => (
-        <div key={idx} style={{ background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", marginBottom: 12, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" }}>
-          <div
-            style={{ padding: "16px 24px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", flexWrap: "wrap", gap: 8 }}
-            onClick={() => setExpandedIdx(expandedIdx === idx ? null : idx)}
-          >
+        <div key={idx} style={{ background: "#fff", borderRadius: 10, border: "1px solid #E5E7EB", marginBottom: 10, overflow: "hidden" }}>
+          <div style={{ padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", flexWrap: "wrap", gap: 8 }} onClick={() => setExpandedIdx(expandedIdx === idx ? null : idx)}>
             <div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#111827" }}>{archive.weekLabel}</div>
-              <div style={{ fontSize: 12, color: "#6B7280", marginTop: 2 }}>
-                {archive.fileName} &middot; {archive.analysis.total} conversations &middot; {archive.analysis.themes.length} themes &middot; Saved {archive.savedDate}
-              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>{archive.weekLabel}</div>
+              <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>{archive.fileName} &middot; {archive.analysis.total} conversations &middot; {archive.analysis.themes.length} themes &middot; Saved {archive.savedDate}</div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={(e) => { e.stopPropagation(); downloadArchive(archive); }} style={{ background: "#6366F1", color: "#fff", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                Download Report
-              </button>
-              <button onClick={(e) => { e.stopPropagation(); downloadCSV(archive); }} style={{ background: "#10B981", color: "#fff", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                Download CSV
-              </button>
-              <button onClick={(e) => { e.stopPropagation(); onDelete(idx); }} style={{ background: "#EF4444", color: "#fff", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-                Delete
-              </button>
-              <span style={{ fontSize: 18, color: "#9CA3AF", display: "flex", alignItems: "center" }}>{expandedIdx === idx ? "\u25B2" : "\u25BC"}</span>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={(e) => { e.stopPropagation(); downloadReport(archive); }} style={{ background: "#6366F1", color: "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Download Report</button>
+              <button onClick={(e) => { e.stopPropagation(); downloadCSV(archive); }} style={{ background: "#10B981", color: "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Download CSV</button>
+              <button onClick={(e) => { e.stopPropagation(); onDelete(idx); }} style={{ background: "#EF4444", color: "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Delete</button>
             </div>
           </div>
-
           {expandedIdx === idx && (
-            <div style={{ padding: "0 24px 20px", borderTop: "1px solid #F3F4F6" }}>
-              <div style={{ marginTop: 16 }}>
-                <h4 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 700, color: "#991B1B" }}>Top 5 Critical Themes</h4>
-                {archive.analysis.top5.map((t, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderBottom: "1px solid #F3F4F6", fontSize: 13 }}>
-                    <span style={{ background: "#DC2626", color: "#fff", borderRadius: 4, padding: "1px 6px", fontSize: 11, fontWeight: 700 }}>#{i + 1}</span>
-                    <ProductBadge product={t.product} />
-                    <FrequencyBadge freq={t.frequency} />
-                    <span style={{ color: "#374151" }}>{t.title}</span>
-                  </div>
-                ))}
-              </div>
-
-              {archive.flagged && archive.flagged.length > 0 && (
-                <div style={{ marginTop: 16, padding: "12px 16px", background: "#FFFBEB", borderRadius: 8, border: "1px solid #FDE68A" }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#92400E", marginBottom: 6 }}>Flagged for PM Review</div>
-                  {archive.flagged.map((t, i) => (
-                    <div key={i} style={{ fontSize: 12, color: "#78350F", padding: "3px 0" }}>{"\uD83D\uDCCC"} [{t.product}] {t.title}</div>
-                  ))}
+            <div style={{ padding: "0 20px 16px", borderTop: "1px solid #F3F4F6" }}>
+              <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700, color: "#991B1B", marginBottom: 6 }}>Top 5 Critical</div>
+              {archive.analysis.top5.map((t, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderBottom: "1px solid #F3F4F6", fontSize: 12 }}>
+                  <Badge label={`#${i + 1}`} color="#fff" bg="#DC2626" />
+                  <Badge label={t.product} color="#fff" bg={productColors[t.product].badge} />
+                  <span style={{ color: "#374151" }}>{t.theme}</span>
                 </div>
-              )}
+              ))}
             </div>
           )}
         </div>
@@ -731,7 +667,6 @@ function DecagonInsights() {
   const [analysis, setAnalysis] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [archives, setArchives] = useState([]);
-  const [flaggedThemes, setFlaggedThemes] = useState([]);
   const [currentWeekLabel, setCurrentWeekLabel] = useState("");
   const [currentFileName, setCurrentFileName] = useState("");
 
@@ -739,39 +674,22 @@ function DecagonInsights() {
     setIsAnalyzing(true);
     setCurrentWeekLabel(weekLabel);
     setCurrentFileName(fileName);
-    // Simulate async processing
     setTimeout(() => {
       const result = analyzeConversations(data, headerMap);
-      if (result.error) {
-        alert(result.error);
-        setIsAnalyzing(false);
-        return;
-      }
+      if (result.error) { alert(result.error); setIsAnalyzing(false); return; }
       setAnalysis(result);
-      setFlaggedThemes([]);
       setIsAnalyzing(false);
       setTab("insights");
-    }, 800);
+    }, 600);
   }, []);
 
   const handleSaveToArchive = useCallback(() => {
     if (!analysis) return;
-    const entry = {
-      weekLabel: currentWeekLabel,
-      fileName: currentFileName,
-      analysis: { ...analysis },
-      flagged: [...flaggedThemes],
+    setArchives(prev => [{
+      weekLabel: currentWeekLabel, fileName: currentFileName, analysis: { ...analysis },
       savedDate: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })
-    };
-    setArchives(prev => [entry, ...prev]);
-  }, [analysis, currentWeekLabel, currentFileName, flaggedThemes]);
-
-  const handleFlag = useCallback((theme) => {
-    setFlaggedThemes(prev => {
-      if (prev.some(t => t.title === theme.title)) return prev;
-      return [...prev, theme];
-    });
-  }, []);
+    }, ...prev]);
+  }, [analysis, currentWeekLabel, currentFileName]);
 
   const handleDeleteArchive = useCallback((idx) => {
     setArchives(prev => prev.filter((_, i) => i !== idx));
@@ -786,8 +704,6 @@ function DecagonInsights() {
   return (
     <div style={{ minHeight: "100vh", background: "#F9FAFB", fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-
-      {/* Header */}
       <div style={{ background: "#fff", borderBottom: "1px solid #E5E7EB", padding: "0 24px" }}>
         <div style={{ maxWidth: 960, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 60 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -797,50 +713,27 @@ function DecagonInsights() {
               <div style={{ fontSize: 11, color: "#9CA3AF", lineHeight: 1 }}>Perpay Product Intelligence</div>
             </div>
           </div>
-
           <div style={{ display: "flex", gap: 2 }}>
             {tabs.map(t => (
-              <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                style={{
-                  padding: "8px 18px",
-                  borderRadius: 8,
-                  border: "none",
-                  background: tab === t.id ? "#EEF2FF" : "transparent",
-                  color: tab === t.id ? "#6366F1" : "#6B7280",
-                  fontSize: 13,
-                  fontWeight: tab === t.id ? 600 : 400,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  transition: "all 0.15s"
-                }}
-              >
-                <span>{t.icon}</span>
-                {t.label}
-                {t.badge && (
-                  <span style={{ background: tab === t.id ? "#6366F1" : "#D1D5DB", color: "#fff", borderRadius: 10, padding: "0 6px", fontSize: 11, fontWeight: 700, minWidth: 18, textAlign: "center" }}>
-                    {t.badge}
-                  </span>
-                )}
+              <button key={t.id} onClick={() => setTab(t.id)}
+                style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: tab === t.id ? "#EEF2FF" : "transparent",
+                  color: tab === t.id ? "#6366F1" : "#6B7280", fontSize: 13, fontWeight: tab === t.id ? 600 : 400, cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 6 }}>
+                <span>{t.icon}</span>{t.label}
+                {t.badge && <span style={{ background: tab === t.id ? "#6366F1" : "#D1D5DB", color: "#fff", borderRadius: 10, padding: "0 6px", fontSize: 11, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{t.badge}</span>}
               </button>
             ))}
           </div>
         </div>
       </div>
-
-      {/* Content */}
       <div style={{ maxWidth: 960, margin: "0 auto" }}>
         {tab === "upload" && <UploadTab onAnalyze={handleAnalyze} isAnalyzing={isAnalyzing} />}
-        {tab === "insights" && <InsightsTab analysis={analysis} onSaveToArchive={handleSaveToArchive} flaggedThemes={flaggedThemes} onFlag={handleFlag} />}
+        {tab === "insights" && <InsightsTab analysis={analysis} onSaveToArchive={handleSaveToArchive} />}
         {tab === "archive" && <ArchiveTab archives={archives} onDelete={handleDeleteArchive} />}
       </div>
     </div>
   );
 }
-
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<DecagonInsights />);
