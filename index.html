@@ -1,8 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Decagon Insights — Perpay Product Intelligence</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%236366F1%22/><text x=%2250%22 y=%2270%22 font-size=%2260%22 text-anchor=%22middle%22 fill=%22white%22 font-family=%22sans-serif%22 font-weight=%22bold%22>P</text></svg>" />
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -10,9 +7,7 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <style>html,body{margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#F9FAFB}*{box-sizing:border-box}</style>
-</head>
-<body>
-<div id="root"></div>
+</head><body><div id="root"></div>
 <script type="text/babel" data-presets="react">
 const { useState, useCallback, useRef, useMemo } = React;
 
@@ -218,6 +213,54 @@ const productColors = {
   "Card":        { bg: "#FFF7ED", border: "#F59E0B", text: "#92400E", badge: "#F59E0B", icon: "\uD83D\uDCB3" }
 };
 
+// ─── Customer text extractor ───
+// Decagon CSV exports often store the conversation as a stringified list of
+// {role, text} events. We extract ONLY the customer (USER) text so quotes
+// are real customer words — not AI replies or JSON metadata.
+function extractUserText(raw) {
+  if (!raw || typeof raw !== "string") return "";
+
+  // Detect structured event data (Python/JSON-style with role + text fields)
+  if (/['"]role['"]\s*:\s*['"](?:USER|user|customer)['"]/i.test(raw) || /['"]text['"]\s*:\s*['"]/.test(raw)) {
+    const userTexts = [];
+
+    // Match role:USER followed by text:... within ~600 chars (text first or role first)
+    const re1 = /['"]role['"]\s*:\s*['"](?:USER|user|customer)['"][^}]{0,600}?['"]text['"]\s*:\s*'((?:[^'\\]|\\.)*)'/gi;
+    const re2 = /['"]role['"]\s*:\s*['"](?:USER|user|customer)['"][^}]{0,600}?['"]text['"]\s*:\s*"((?:[^"\\]|\\.)*)"/gi;
+    const re3 = /['"]text['"]\s*:\s*'((?:[^'\\]|\\.)*)'[^}]{0,600}?['"]role['"]\s*:\s*['"](?:USER|user|customer)['"]/gi;
+    const re4 = /['"]text['"]\s*:\s*"((?:[^"\\]|\\.)*)"[^}]{0,600}?['"]role['"]\s*:\s*['"](?:USER|user|customer)['"]/gi;
+    let m;
+    [re1, re2, re3, re4].forEach(re => { while ((m = re.exec(raw)) !== null) userTexts.push(m[1]); });
+
+    if (userTexts.length > 0) {
+      return userTexts
+        .map(t => t
+          .replace(/\\n/g, " ")
+          .replace(/\\r/g, " ")
+          .replace(/\\t/g, " ")
+          .replace(/\\u200b|\\ufeff/gi, "")
+          .replace(/\\'/g, "'")
+          .replace(/\\"/g, '"')
+          .replace(/\\\\/g, "\\")
+          // Strip email subject lines, signatures, addresses
+          .replace(/^Subject:\s*[^\n.]*[\n.]?/i, "")
+          .replace(/\b\d{1,5}\s+\w+\s+(?:Street|St|Avenue|Ave|Suite|Ste|Road|Rd)\b[^.]*\.?/gi, "")
+          .replace(/\bUnsubscribe\b[^.]*$/i, "")
+          .replace(/\s+/g, " ")
+          .trim())
+        .filter(t => t.length > 5)
+        .join(" ");
+    }
+  }
+
+  // Plain text fallback — strip obvious metadata
+  return raw
+    .replace(/\\n/g, " ")
+    .replace(/\\u200b|\\ufeff/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // ─── Analysis Engine ───
 function analyzeConversations(rows, headerMap) {
   const msgField = headerMap.message;
@@ -230,48 +273,63 @@ function analyzeConversations(rows, headerMap) {
   let totalRelevant = 0;
 
   rows.forEach((row, idx) => {
-    const text = row[msgField] || "";
-    if (!text || text.length < 20) return;
+    const raw = row[msgField] || "";
+    const userText = extractUserText(raw);
+    if (!userText || userText.length < 15) return;
 
     const id = idField ? row[idField] : `conv-${idx + 1}`;
     const date = dateField ? row[dateField] : null;
 
-    // Split into sentences for targeted quote extraction
-    const sentences = text.split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(s => s.length > 10 && s.length < 300);
+    // Split into clean sentences for quote extraction
+    const sentences = userText
+      .split(/(?<=[.!?])\s+|(?:\.\s)|(?:\?\s)|(?:!\s)/)
+      .map(s => s.trim())
+      .filter(s => s.length > 10 && s.length < 220 && /[a-zA-Z]/.test(s) && !/^[A-Z][a-z]+:\s/.test(s));
 
     // Test each issue
     let matched = false;
     for (const issue of ISSUE_CATALOG) {
-      const isMatch = issue.patterns.some(p => p.test(text));
+      const isMatch = issue.patterns.some(p => p.test(userText));
       if (!isMatch) continue;
       matched = true;
 
-      // Extract quotes: sentences that match the issue's own patterns (guaranteed on-theme)
-      const quotes = sentences.filter(s => issue.patterns.some(p => p.test(s))).slice(0, 2);
+      // Quotes: sentences from THIS conversation that match THIS issue's patterns
+      const matchingQuotes = sentences.filter(s => issue.patterns.some(p => p.test(s)));
 
       if (!themeMap[issue.id]) {
-        themeMap[issue.id] = {
-          ...issue,
-          conversations: [],
-          quotes: new Set()
-        };
+        themeMap[issue.id] = { ...issue, conversations: [], quotes: new Set() };
       }
-      themeMap[issue.id].conversations.push({ id, date, text, excerpt: text.slice(0, 280) });
-      quotes.forEach(q => themeMap[issue.id].quotes.add(q));
+      themeMap[issue.id].conversations.push({ id, date, text: userText, excerpt: userText.slice(0, 280) });
+      matchingQuotes.forEach(q => themeMap[issue.id].quotes.add(q));
     }
     if (matched) totalRelevant++;
   });
 
-  // Convert sets to arrays, compute frequency
+  // Convert sets to arrays, rank quotes for clarity, compute frequency
   const themes = Object.values(themeMap).map(t => {
     const count = t.conversations.length;
     const frequency = count >= 8 ? "High" : count >= 3 ? "Medium" : "Low";
-    return {
-      ...t,
-      quotes: Array.from(t.quotes).slice(0, 3),
-      count,
-      frequency
-    };
+
+    // Rank quotes: prefer 30–140 chars, no metadata noise, contains 'I/my/me' (first-person)
+    const rankedQuotes = Array.from(t.quotes)
+      .map(q => {
+        let score = 0;
+        const len = q.length;
+        if (len >= 30 && len <= 140) score += 5;
+        else if (len < 30) score += 1;
+        else score -= Math.floor((len - 140) / 30);
+        if (/\b(I|my|me|i'?m|i'?ve|i'?d)\b/i.test(q)) score += 3;
+        if (/['"][a-z_]+['"]\s*:/i.test(q)) score -= 10; // JSON-like metadata
+        if (/external_id|created_at|conversation_id|\bid':/i.test(q)) score -= 10;
+        if (/^Subject:/i.test(q)) score -= 5;
+        return { q, score };
+      })
+      .filter(x => x.score > -5)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .map(x => x.q);
+
+    return { ...t, quotes: rankedQuotes, count, frequency };
   });
 
   // Sort within each product by severity × frequency
@@ -737,6 +795,4 @@ function DecagonInsights() {
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(<DecagonInsights />);
-</script>
-</body>
-</html>
+</script></body></html>
