@@ -1,12 +1,11 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Decagon Insights — Perpay Product Intelligence</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%236366F1%22/><text x=%2250%22 y=%2270%22 font-size=%2260%22 text-anchor=%22middle%22 fill=%22white%22 font-family=%22sans-serif%22 font-weight=%22bold%22>P</text></svg>" />
+<html lang="en"><head><meta charset="utf-8"/><title>Decagon Insights — Perpay</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-<style>html,body{margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#F9FAFB}*{box-sizing:border-box}</style>
+<style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#F9FAFB;}</style>
 </head><body><div id="root"></div>
 <script type="text/babel" data-presets="react">
 const { useState, useCallback, useRef, useMemo } = React;
@@ -24,7 +23,13 @@ const ISSUE_CATALOG = [
     id: "mp-approval-denied",
     product: "Marketplace",
     theme: "Order approval denied without clear reason",
-    patterns: [/\bnot\s+approved\b/i, /\bdenied\b/i, /\bwasn'?t\s+approved\b/i, /\bwhy.*(?:denied|declined|rejected)\b/i, /\brejected\b/i, /\bdisapproved\b/i],
+    patterns: [
+      /\bnot\s+approved\b/i,
+      /\border\s+(?:was\s+)?denied\b/i,
+      /\b(?:my\s+)?(?:order|application|purchase)\s+(?:was\s+)?(?:denied|rejected|disapproved)\b/i,
+      /\bwasn'?t\s+approved\b/i,
+      /\bwhy.*(?:wasn'?t|was\s+not).*\bapproved\b/i
+    ],
     recommendation: "Surface a specific denial reason in-product immediately after a failed approval. Replace generic rejection messaging with the underlying cause (e.g., spending limit, verification, employment gap) and a clear next step.",
     severity: 5
   },
@@ -32,7 +37,13 @@ const ISSUE_CATALOG = [
     id: "mp-spending-limit-low",
     product: "Marketplace",
     theme: "Spending limit lower than customer expected",
-    patterns: [/\bspending\s+limit\b/i, /\blimit\s+(?:is\s+)?(?:too\s+)?low\b/i, /\bwhy.*\blimit\b/i, /\bonly\s+\$?\d+\s+(?:limit|spend)/i, /\bincrease\s+(?:my\s+)?limit\b/i],
+    patterns: [
+      /\bspending\s+limit\s+(?:is\s+|too\s+|so\s+)?(?:low|small|dropped|decreased|lowered)/i,
+      /\b(?:why|why\s+did).*spending\s+limit/i,
+      /\bonly\s+(?:have\s+)?\$?\d+\s+(?:to\s+)?(?:spend|limit)\b/i,
+      /\bincrease\s+(?:my\s+)?spending\s+limit\b/i,
+      /\bspending\s+limit\s+dropped\b/i
+    ],
     recommendation: "Explain how the Marketplace spending limit is calculated in-app before customers browse. Add a transparent 'how to increase your limit' flow tied to payment history.",
     severity: 4
   },
@@ -40,7 +51,13 @@ const ISSUE_CATALOG = [
     id: "mp-tracking-broken",
     product: "Marketplace",
     theme: "Tracking stops updating or never starts",
-    patterns: [/\btracking\s+(?:number|info|link)?\s*(?:not|isn'?t|hasn'?t|stopped|stuck)/i, /\bno\s+tracking\b/i, /\btracking\s+hasn'?t\s+updated\b/i, /\bwhere.*my\s+order\b/i],
+    patterns: [
+      /\btracking\s+(?:number|info|link|status)?\s*(?:is\s+)?(?:not|isn'?t|hasn'?t\s+been)\s+(?:updating|updated|moving|working)/i,
+      /\bno\s+tracking\s+(?:number|info|update)/i,
+      /\btracking\s+(?:is\s+)?stuck\b/i,
+      /\bwhere\s+is\s+my\s+(?:order|package|shipment)\b/i,
+      /\bhaven'?t\s+received.*tracking\b/i
+    ],
     recommendation: "Instrument end-to-end tracking reliability by carrier. Add proactive in-app alerts when tracking hasn't updated in 5+ days instead of requiring customers to ask.",
     severity: 3
   },
@@ -48,7 +65,13 @@ const ISSUE_CATALOG = [
     id: "mp-item-never-shipped",
     product: "Marketplace",
     theme: "Order placed but item never shipped",
-    patterns: [/\bnever\s+shipped\b/i, /\bstill\s+(?:waiting|hasn'?t\s+shipped)\b/i, /\bhasn'?t\s+shipped\b/i, /\border.*(?:weeks|months)\s+ago\b/i, /\bno\s+shipping\s+confirmation\b/i],
+    patterns: [
+      /\bnever\s+shipped\b/i,
+      /\b(?:still|hasn'?t)\s+(?:been\s+)?ship(?:ped)?\b/i,
+      /\border.*(?:weeks|months)\s+ago.*(?:hasn'?t|still|nothing)/i,
+      /\bno\s+shipping\s+confirmation\b/i,
+      /\bwhen\s+will\s+(?:my\s+)?order\s+ship\b/i
+    ],
     recommendation: "Define a hard SLA for ship-by dates and auto-cancel/refund orders exceeding it without customer action. Expose ship-by commitment at checkout, not after purchase.",
     severity: 5
   },
@@ -56,7 +79,14 @@ const ISSUE_CATALOG = [
     id: "mp-return-refund",
     product: "Marketplace",
     theme: "Return or refund process is unclear or broken",
-    patterns: [/\bcan'?t\s+return\b/i, /\bhow.*return\b/i, /\brefund.*(?:not\s+received|missing|where)\b/i, /\bstill\s+waiting.*refund\b/i, /\breturn\s+policy\b/i],
+    patterns: [
+      /\bcan'?t\s+return\s+(?:my|this|the)\b/i,
+      /\bhow\s+(?:do\s+)?I\s+return\b/i,
+      /\brefund\s+(?:has\s+not|hasn'?t|not)\s+(?:been\s+)?(?:received|processed|issued|returned)/i,
+      /\bstill\s+waiting\s+(?:on|for)\s+(?:my\s+)?refund\b/i,
+      /\bwhere\s+is\s+my\s+refund\b/i,
+      /\bwant\s+(?:a\s+)?refund\b/i
+    ],
     recommendation: "Build a self-serve return flow directly in the Marketplace order history. Show refund status and ETA at every step rather than requiring support contact.",
     severity: 4
   },
@@ -64,15 +94,27 @@ const ISSUE_CATALOG = [
     id: "mp-cancel-order",
     product: "Marketplace",
     theme: "Customers want to cancel an order but cannot self-serve",
-    patterns: [/\bcancel\s+(?:my\s+)?order\b/i, /\bhow.*cancel.*order\b/i, /\bneed\s+to\s+cancel\b/i, /\bwant\s+to\s+cancel.*order\b/i],
+    patterns: [
+      /\bcancel\s+(?:my|this|the|order\s+#?\w*|order\s+P\d+)\s*order\b/i,
+      /\bI\s+want\s+to\s+cancel\s+(?:my\s+)?order\b/i,
+      /\bneed\s+to\s+cancel\s+(?:my\s+)?order\b/i,
+      /\bhow\s+(?:do\s+I\s+|can\s+I\s+)?cancel\s+(?:my\s+)?order\b/i,
+      /\bcancel\s+order\s+(?:#|P\d)/i
+    ],
     recommendation: "Add a self-serve 'Cancel order' button available until the item ships. Today, customers have to contact support for any cancellation — a clear friction point.",
     severity: 4
   },
   {
     id: "mp-wrong-item",
     product: "Marketplace",
-    theme: "Received wrong or damaged item",
-    patterns: [/\bwrong\s+item\b/i, /\bdamaged\b/i, /\bbroken\b/i, /\bnot\s+what\s+I\s+ordered\b/i, /\bdefective\b/i],
+    theme: "Received wrong, damaged, or defective item",
+    patterns: [
+      /\bwrong\s+item\b/i,
+      /\breceived\s+(?:the\s+)?(?:wrong|damaged|broken|defective)\b/i,
+      /\bnot\s+what\s+I\s+ordered\b/i,
+      /\bitem\s+(?:is\s+|arrived\s+|came\s+)?(?:damaged|broken|defective)\b/i,
+      /\barrived\s+damaged\b/i
+    ],
     recommendation: "Create a guided wrong-item/damaged-item report flow with photo upload and same-day resolution SLA. Route to replacement or instant refund without back-and-forth.",
     severity: 3
   },
@@ -82,7 +124,13 @@ const ISSUE_CATALOG = [
     id: "core-payment-not-processing",
     product: "Core",
     theme: "Direct deposit payment did not process",
-    patterns: [/\bdirect\s+deposit\b/i, /\bpaycheck\s+(?:not|didn'?t|missed)\b/i, /\bpayment\s+(?:not\s+process|didn'?t\s+go\s+through|missed)\b/i, /\bno\s+payment\s+taken\b/i],
+    patterns: [
+      /\bdirect\s+deposit\s+(?:didn'?t|did\s+not|not\s+process|hasn'?t|wasn'?t)/i,
+      /\bpaycheck\s+(?:didn'?t|did\s+not|was\s+not|not)\s+(?:come|deduct|take|process)/i,
+      /\bpayment\s+didn'?t\s+(?:go\s+through|process|post)/i,
+      /\bno\s+payment\s+(?:was\s+)?(?:taken|deducted|processed)/i,
+      /\bmissed\s+(?:my\s+)?(?:paycheck\s+)?payment\b/i
+    ],
     recommendation: "Build an in-app diagnostic for direct deposit status. When a scheduled deduction is missed, notify the customer proactively with the reason (employer change, pay gap, etc.) rather than letting the balance silently grow.",
     severity: 5
   },
@@ -90,23 +138,40 @@ const ISSUE_CATALOG = [
     id: "core-employer-not-found",
     product: "Core",
     theme: "Employer or payroll system not recognized",
-    patterns: [/\bemployer\s+(?:not|isn'?t).*(?:listed|found|recognized)/i, /\bcan'?t\s+find\s+(?:my\s+)?employer\b/i, /\bpayroll.*not.*work/i, /\bemployer.*not\s+supported\b/i],
+    patterns: [
+      /\bemployer\s+(?:is\s+)?not\s+(?:listed|found|recognized|showing|supported)/i,
+      /\bcan'?t\s+find\s+(?:my\s+)?employer\b/i,
+      /\bmy\s+employer\s+isn'?t\b/i,
+      /\bpayroll\s+(?:system\s+)?(?:not|isn'?t|doesn'?t)\s+(?:work|support)/i
+    ],
     recommendation: "Expand the supported-employer list and add a clear 'request my employer' flow. For unsupported payroll systems, offer an explicit alternative path (e.g., manual pay schedule) instead of blocking.",
     severity: 4
   },
   {
     id: "core-update-payment-info",
     product: "Core",
-    theme: "Cannot update payment or banking information",
-    patterns: [/\bupdate\s+(?:my\s+)?(?:payment|bank|direct\s+deposit)/i, /\bchange\s+(?:my\s+)?bank\b/i, /\bnew\s+(?:employer|job)\b/i, /\bswitched\s+jobs\b/i],
+    theme: "Cannot update employer, payment, or banking information",
+    patterns: [
+      /\bupdate\s+(?:my\s+)?(?:employer|payment\s+info|bank\s+info|direct\s+deposit)/i,
+      /\bchange\s+(?:my\s+)?(?:bank|employer|direct\s+deposit)/i,
+      /\bswitched\s+(?:jobs|employers)\b/i,
+      /\bnew\s+(?:employer|job).*(?:update|change)/i,
+      /\bhow\s+(?:do\s+)?I\s+change\s+(?:my\s+)?(?:employer|bank)/i
+    ],
     recommendation: "Build a first-class 'Update employment/payment info' flow in Settings. Today, a job change often requires support escalation — predictable life events should be self-serve.",
     severity: 4
   },
   {
     id: "core-payment-plan-confusion",
     product: "Core",
-    theme: "Payment plan terms or balance breakdown is confusing",
-    patterns: [/\bpayment\s+plan\b/i, /\bhow\s+much.*owe\b/i, /\bbalance.*(?:wrong|doesn'?t\s+match)\b/i, /\bpayment.*schedule\b/i, /\bhow\s+many\s+payments\b/i],
+    theme: "Payment plan balance or schedule is confusing",
+    patterns: [
+      /\bhow\s+much\s+(?:do\s+)?I\s+(?:still\s+)?owe\b/i,
+      /\bmy\s+balance\s+(?:is\s+)?(?:wrong|doesn'?t\s+match|incorrect)/i,
+      /\bhow\s+many\s+payments\s+(?:do\s+I\s+have\s+)?left\b/i,
+      /\bwhen\s+is\s+my\s+next\s+payment\b/i,
+      /\bpayment\s+schedule\s+(?:is\s+)?(?:unclear|confusing|wrong)/i
+    ],
     recommendation: "Redesign the Core payment plan view to show: total remaining, per-paycheck amount, date of next deduction, and estimated payoff date — all on one screen.",
     severity: 3
   },
@@ -114,7 +179,12 @@ const ISSUE_CATALOG = [
     id: "core-early-payoff",
     product: "Core",
     theme: "Customers want to pay off balance early but flow is unclear",
-    patterns: [/\bpay\s+off\s+(?:early|now|full)/i, /\bearly\s+pay(?:off|ment)/i, /\blump\s+sum\b/i, /\bpay.*in\s+full\b/i],
+    patterns: [
+      /\bpay\s+(?:it\s+)?off\s+(?:early|now|in\s+full|today)/i,
+      /\bearly\s+pay(?:off|ment)\b/i,
+      /\blump\s+sum\s+payment\b/i,
+      /\bhow\s+(?:do\s+)?I\s+pay\s+(?:my\s+)?(?:balance\s+)?off\b/i
+    ],
     recommendation: "Add a prominent 'Pay early' option in the Core dashboard with a clear preview of what the payoff removes from future paychecks.",
     severity: 2
   },
@@ -124,7 +194,13 @@ const ISSUE_CATALOG = [
     id: "pp-credit-not-reporting",
     product: "Perpay+",
     theme: "Credit score not reporting or not increasing as promised",
-    patterns: [/\bcredit\s+score\s+(?:didn'?t|hasn'?t|not)\b/i, /\bnot\s+reporting\b/i, /\bscore.*(?:drop|decrease|down)/i, /\bdidn'?t\s+(?:show|report|update)/i, /\bexperian|transunion|equifax/i],
+    patterns: [
+      /\bcredit\s+score\s+(?:didn'?t|hasn'?t|has\s+not|isn'?t|is\s+not|went\s+down|dropped)/i,
+      /\b(?:score|credit)\s+(?:not|isn'?t|hasn'?t)\s+(?:reporting|updated|updating|increasing)/i,
+      /\bnot\s+reporting\s+to\s+(?:credit|bureau)/i,
+      /\bdidn'?t\s+report\s+to\b/i,
+      /\b(?:experian|transunion|equifax)\s+(?:not|hasn'?t|didn'?t)\b/i
+    ],
     recommendation: "Set explicit, honest expectations about when and how Perpay+ reports to bureaus. Show the exact report date, bureau(s) covered, and last-reported balance in-app.",
     severity: 5
   },
@@ -132,23 +208,42 @@ const ISSUE_CATALOG = [
     id: "pp-cancel-subscription",
     product: "Perpay+",
     theme: "Customers trying to cancel Perpay+ subscription",
-    patterns: [/\bcancel\s+(?:my\s+)?perpay\+/i, /\bcancel.*subscription\b/i, /\bunsubscribe\b/i, /\bstop.*perpay\+/i, /\bdon'?t\s+want.*perpay\+/i],
+    patterns: [
+      /\bcancel\s+(?:my\s+)?perpay\s*\+/i,
+      /\bcancel\s+(?:my\s+)?(?:perpay\s*\+\s+)?subscription\b/i,
+      /\bunsubscribe\s+(?:from\s+)?perpay\s*\+/i,
+      /\bstop\s+(?:my\s+)?perpay\s*\+/i,
+      /\b(?:don'?t|do\s+not)\s+want\s+perpay\s*\+/i,
+      /\bdidn'?t\s+(?:sign\s+up|enroll)\s+(?:for|in)\s+perpay\s*\+/i
+    ],
     recommendation: "Build a transparent in-app cancellation flow with a retention step that shows credit-building progress and what they'd lose. Cancellation friction creates trust damage — make it one-click.",
     severity: 5
   },
   {
     id: "pp-value-unclear",
     product: "Perpay+",
-    theme: "Unclear what Perpay+ does or what value it provides",
-    patterns: [/\bwhat\s+(?:is|does)\s+perpay\+/i, /\bwhy.*perpay\+/i, /\bperpay\+.*worth\b/i, /\bdidn'?t\s+know.*perpay\+/i, /\bwhat\s+am\s+I\s+paying\s+for\b/i],
+    theme: "Unclear what Perpay+ is or what value it provides",
+    patterns: [
+      /\bwhat\s+is\s+perpay\s*\+/i,
+      /\bwhat\s+does\s+perpay\s*\+\s+do\b/i,
+      /\bis\s+perpay\s*\+\s+worth\b/i,
+      /\bwhat\s+am\s+I\s+paying\s+(?:for|\$?\d+)/i,
+      /\bwhat'?s\s+the\s+(?:benefit|point)\s+of\s+perpay\s*\+/i
+    ],
     recommendation: "Redesign the Perpay+ value prop on the subscription screen. Show concrete benefits already delivered (reports made, months of history built) — not just feature list.",
-    severity: 4
+    severity: 3
   },
   {
     id: "pp-unexpected-charge",
     product: "Perpay+",
-    theme: "Customer didn't know they were enrolled in Perpay+",
-    patterns: [/\bdidn'?t\s+sign\s+up\b/i, /\bdidn'?t\s+know.*charged\b/i, /\bwhy.*charged.*perpay\+/i, /\bnever\s+signed\s+up\b/i, /\bautomatic.*enroll/i],
+    theme: "Customer didn't know they were enrolled in Perpay+ / unexpected charge",
+    patterns: [
+      /\bdidn'?t\s+sign\s+up\s+for\s+perpay\s*\+/i,
+      /\bnever\s+signed\s+up\s+for\s+perpay\s*\+/i,
+      /\bwhy\s+(?:am|was)\s+I\s+(?:being\s+)?charged\s+for\s+perpay\s*\+/i,
+      /\bdidn'?t\s+(?:know|realize).*charged.*perpay\s*\+/i,
+      /\b(?:auto|automatically)\s+enroll(?:ed)?\s+(?:in|into)\s+perpay\s*\+/i
+    ],
     recommendation: "Audit the Perpay+ enrollment surface. Ensure opt-in is explicit, clearly priced, and confirmed post-enrollment via email. Ambiguous enrollment is a major trust risk.",
     severity: 5
   },
@@ -158,7 +253,12 @@ const ISSUE_CATALOG = [
     id: "card-declined",
     product: "Card",
     theme: "Card declined unexpectedly at checkout",
-    patterns: [/\bcard\s+(?:was\s+)?declined\b/i, /\bdeclined.*(?:purchase|transaction|checkout)/i, /\bwhy.*declined\b/i, /\bkeeps\s+getting\s+declined\b/i],
+    patterns: [
+      /\b(?:my\s+)?(?:perpay\s+)?card\s+(?:was\s+|got\s+|keeps\s+getting\s+)?declined\b/i,
+      /\bdeclined\s+(?:at\s+)?(?:checkout|purchase|transaction|the\s+store)/i,
+      /\bwhy\s+(?:was\s+|is\s+|did\s+)?my\s+card\s+declined\b/i,
+      /\bcouldn'?t\s+use\s+(?:my\s+)?card\b/i
+    ],
     recommendation: "In real-time push notifications on decline, include the specific reason (available credit, merchant category, fraud flag) and a direct in-app action to resolve it.",
     severity: 5
   },
@@ -166,7 +266,13 @@ const ISSUE_CATALOG = [
     id: "card-available-credit-wrong",
     product: "Card",
     theme: "Available credit doesn't match customer's expectation",
-    patterns: [/\bavailable\s+credit\b/i, /\bcredit.*(?:wrong|less|missing)/i, /\bshould\s+have\s+more.*credit\b/i, /\bpending.*credit\b/i, /\blimit.*doesn'?t\s+match/i],
+    patterns: [
+      /\bavailable\s+credit\s+(?:is\s+)?(?:wrong|incorrect|less|lower|off)/i,
+      /\bshould\s+have\s+more\s+(?:available\s+)?credit\b/i,
+      /\bavailable\s+credit\s+doesn'?t\s+match\b/i,
+      /\bwhy\s+(?:is\s+)?my\s+available\s+credit\b/i,
+      /\bpending\s+(?:transactions?\s+)?(?:not\s+)?showing\b/i
+    ],
     recommendation: "Show a breakdown of available credit: limit, pending authorizations, posted transactions, and recent payments. Today customers can't reconcile why their available credit differs from their mental model.",
     severity: 4
   },
@@ -174,7 +280,13 @@ const ISSUE_CATALOG = [
     id: "card-activation",
     product: "Card",
     theme: "Difficulty activating new card",
-    patterns: [/\bactivat(?:e|ing)\s+(?:my\s+)?card\b/i, /\bcan'?t\s+activate\b/i, /\bcard.*not\s+working\s+yet\b/i, /\bnew\s+card.*(?:doesn'?t|not)\b/i],
+    patterns: [
+      /\bcan'?t\s+activate\s+(?:my\s+)?card\b/i,
+      /\b(?:trouble|issue|problem)\s+activating\s+(?:my\s+)?card\b/i,
+      /\bhow\s+(?:do\s+)?I\s+activate\s+(?:my\s+)?card\b/i,
+      /\bnew\s+card\s+(?:isn'?t|is\s+not|doesn'?t)\s+work/i,
+      /\bcard\s+(?:won'?t|will\s+not)\s+activate\b/i
+    ],
     recommendation: "Simplify activation to a single tap inside the app using the existing session. Remove reliance on web-based activation flows and separate CVV entry for most cases.",
     severity: 3
   },
@@ -182,23 +294,42 @@ const ISSUE_CATALOG = [
     id: "card-payment-not-posted",
     product: "Card",
     theme: "Payment made but not reflected on card balance",
-    patterns: [/\bpayment\s+(?:not|hasn'?t)\s+(?:post|reflect|show)/i, /\bmade\s+(?:a\s+)?payment.*(?:still|not)/i, /\bpayment.*(?:disappeared|missing)/i, /\bautopay.*not/i],
+    patterns: [
+      /\bpayment\s+(?:has\s+)?(?:not|hasn'?t)\s+(?:posted|been\s+posted|reflected|shown|showing)/i,
+      /\bmade\s+(?:a\s+)?payment.*(?:still\s+shows|not\s+showing|not\s+reflected)/i,
+      /\bmy\s+payment\s+(?:is\s+)?(?:missing|disappeared|gone)/i,
+      /\bautopay\s+(?:didn'?t|did\s+not|hasn'?t|isn'?t)\s+(?:work|run|post|process)/i
+    ],
     recommendation: "Show payment status explicitly: Scheduled / Processing / Posted / Available. Currently, payments appear to 'disappear' during the processing window, creating repeat contacts.",
     severity: 4
   },
   {
-    id: "card-apr-interest-confusion",
+    id: "card-interest-confusion",
     product: "Card",
     theme: "Confusion about interest charges or statement balance",
-    patterns: [/\binterest\s+(?:charge|fee)/i, /\bapr\b/i, /\bstatement\s+balance\b/i, /\bwhy.*interest\b/i, /\bdidn'?t\s+know.*interest\b/i],
+    patterns: [
+      /\binterest\s+charge(?:s|d)?\b/i,
+      /\b(?:charged|paying)\s+(?:so\s+much\s+)?interest\b/i,
+      /\bstatement\s+balance\b/i,
+      /\bwhy\s+(?:am\s+I\s+|was\s+I\s+)?charged\s+(?:so\s+much\s+)?interest\b/i,
+      /\bdidn'?t\s+(?:know|expect)\s+(?:about\s+)?(?:the\s+)?interest\b/i,
+      /\b\d+(?:\.\d+)?\s*%\s*APR\b/,
+      /\bhigh\s+APR\b/,
+      /\bminimum\s+payment\s+(?:is\s+)?(?:too\s+)?(?:high|confusing|unclear)/i
+    ],
     recommendation: "Show an interest preview before statement close: 'Pay $X by [date] to avoid $Y in interest.' Make the grace-period mechanics visible instead of post-hoc.",
     severity: 4
   },
   {
     id: "card-limit-increase",
     product: "Card",
-    theme: "Customers asking how to get a credit limit increase",
-    patterns: [/\blimit\s+increase\b/i, /\bincrease\s+(?:my\s+)?credit\s+limit\b/i, /\bhigher\s+limit\b/i, /\bhow.*raise.*limit\b/i],
+    theme: "Customers asking for a credit limit increase",
+    patterns: [
+      /\bcredit\s+limit\s+increase\b/i,
+      /\bincrease\s+(?:my\s+)?credit\s+limit\b/i,
+      /\b(?:higher|bigger|raise)\s+(?:my\s+)?credit\s+limit\b/i,
+      /\bhow\s+(?:do\s+I\s+|can\s+I\s+)?(?:get\s+|raise\s+)?(?:a\s+)?(?:higher\s+)?credit\s+limit\b/i
+    ],
     recommendation: "Introduce a transparent, data-driven limit increase flow. Show customers what behaviors (on-time payments, tenure) trigger increases and when the next review happens.",
     severity: 2
   },
@@ -602,41 +733,90 @@ function ArchiveTab({ archives, onDelete }) {
   const [expandedIdx, setExpandedIdx] = useState(null);
 
   const downloadReport = (archive) => {
-    const lines = [];
-    lines.push(`PERPAY PRODUCT INSIGHTS REPORT`);
-    lines.push(`${archive.weekLabel}`);
-    lines.push(`Generated: ${archive.analysis.analysisDate}`);
-    lines.push("=".repeat(60));
-    lines.push(`SUMMARY: ${archive.analysis.total} total | ${archive.analysis.relevant} actionable | ${archive.analysis.themes.length} themes`);
-    lines.push("");
-    lines.push("=".repeat(60));
-    lines.push("TOP 5 MOST CRITICAL INSIGHTS");
-    lines.push("=".repeat(60));
-    archive.analysis.top5.forEach((t, i) => {
-      lines.push(`\n#${i + 1} [${t.product}] ${t.theme}`);
-      lines.push(`Frequency: ${t.frequency} (${t.count} conversations)`);
-      if (t.quotes.length > 0) { lines.push("Quotes:"); t.quotes.forEach(q => lines.push(`  > "${q}"`)); }
-      lines.push(`Recommendation: ${t.recommendation}`);
-    });
+    const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const freqColor = (f) => f === "High" ? "#DC2626" : f === "Medium" ? "#D97706" : "#059669";
+    const freqBg = (f) => f === "High" ? "#FEE2E2" : f === "Medium" ? "#FEF3C7" : "#D1FAE5";
 
-    PRODUCT_ORDER.forEach(product => {
+    const themeCardHTML = (t, rank) => {
+      const c = productColors[t.product] || productColors["Core"];
+      const quotesHTML = (t.quotes || []).map(q => `
+        <div style="background:#F9FAFB;border-left:3px solid ${c.border};padding:10px 14px;margin:8px 0;border-radius:4px;font-style:italic;color:#374151;font-size:13px;line-height:1.5;">
+          &ldquo;${esc(q)}&rdquo;
+        </div>`).join("");
+      return `
+      <div style="background:#fff;border:1px solid #E5E7EB;border-left:4px solid ${c.border};border-radius:10px;padding:18px 20px;margin-bottom:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:260px;">
+            ${rank ? `<div style="font-size:11px;font-weight:700;color:#6366F1;margin-bottom:4px;">#${rank} CRITICAL</div>` : ""}
+            <div style="font-size:16px;font-weight:700;color:#111827;line-height:1.3;">${esc(t.theme)}</div>
+            <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">
+              <span style="display:inline-block;background:${c.badge};color:#fff;font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;">${c.icon} ${esc(t.product)}</span>
+              <span style="display:inline-block;background:${freqBg(t.frequency)};color:${freqColor(t.frequency)};font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;">${esc(t.frequency)} Frequency</span>
+              <span style="display:inline-block;background:#F3F4F6;color:#4B5563;font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;">${t.count} conversation${t.count === 1 ? "" : "s"}</span>
+            </div>
+          </div>
+        </div>
+        ${quotesHTML ? `<div style="margin-top:10px;"><div style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Customer Signals</div>${quotesHTML}</div>` : ""}
+        <div style="margin-top:12px;background:${c.bg};border-radius:6px;padding:10px 14px;">
+          <div style="font-size:11px;font-weight:700;color:${c.text};text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Recommendation</div>
+          <div style="font-size:13px;color:${c.text};line-height:1.5;">${esc(t.recommendation)}</div>
+        </div>
+      </div>`;
+    };
+
+    const top5HTML = archive.analysis.top5.map((t, i) => themeCardHTML(t, i + 1)).join("");
+    const productSectionsHTML = PRODUCT_ORDER.map(product => {
       const themes = archive.analysis.byProduct[product] || [];
-      if (themes.length === 0) return;
-      lines.push("\n" + "=".repeat(60));
-      lines.push(product.toUpperCase());
-      lines.push("=".repeat(60));
-      themes.forEach((t, i) => {
-        lines.push(`\n${i + 1}. ${t.theme}`);
-        lines.push(`Frequency: ${t.frequency} (${t.count} conversations)`);
-        if (t.quotes.length > 0) { lines.push("Quotes:"); t.quotes.forEach(q => lines.push(`  > "${q}"`)); }
-        lines.push(`Recommendation: ${t.recommendation}`);
-      });
-    });
+      if (themes.length === 0) return "";
+      const c = productColors[product];
+      const totalCount = themes.reduce((s, t) => s + t.count, 0);
+      return `
+      <section style="margin-top:36px;">
+        <div style="display:flex;align-items:center;gap:10px;padding-bottom:10px;border-bottom:2px solid ${c.border};margin-bottom:16px;">
+          <div style="font-size:22px;">${c.icon}</div>
+          <h2 style="margin:0;font-size:20px;font-weight:700;color:${c.text};">${esc(product)}</h2>
+          <span style="background:${c.badge};color:#fff;font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;">${themes.length} theme${themes.length === 1 ? "" : "s"} · ${totalCount} convs</span>
+        </div>
+        ${themes.map(t => themeCardHTML(t)).join("")}
+      </section>`;
+    }).join("");
 
-    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/><title>Perpay Product Insights — ${esc(archive.weekLabel)}</title>
+<style>
+  body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#F9FAFB; color:#111827; }
+  @media print { body { background:#fff; } .no-print { display:none; } }
+</style></head>
+<body>
+<div style="max-width:960px;margin:0 auto;padding:32px 24px;">
+  <header style="background:linear-gradient(135deg,#6366F1,#4338CA);color:#fff;border-radius:14px;padding:28px 32px;margin-bottom:28px;">
+    <div style="font-size:12px;font-weight:600;opacity:0.85;letter-spacing:0.1em;text-transform:uppercase;">Perpay Product Insights Report</div>
+    <h1 style="margin:6px 0 0;font-size:28px;font-weight:700;">${esc(archive.weekLabel)}</h1>
+    <div style="margin-top:8px;font-size:13px;opacity:0.9;">Generated ${esc(archive.analysis.analysisDate)}</div>
+    <div style="display:flex;gap:24px;margin-top:20px;flex-wrap:wrap;">
+      <div><div style="font-size:24px;font-weight:700;">${archive.analysis.total}</div><div style="font-size:11px;opacity:0.85;text-transform:uppercase;letter-spacing:0.05em;">Total conversations</div></div>
+      <div><div style="font-size:24px;font-weight:700;">${archive.analysis.relevant}</div><div style="font-size:11px;opacity:0.85;text-transform:uppercase;letter-spacing:0.05em;">Actionable</div></div>
+      <div><div style="font-size:24px;font-weight:700;">${archive.analysis.themes.length}</div><div style="font-size:11px;opacity:0.85;text-transform:uppercase;letter-spacing:0.05em;">Themes surfaced</div></div>
+    </div>
+  </header>
+
+  <section>
+    <h2 style="margin:0 0 14px;font-size:20px;font-weight:700;color:#111827;">Top 5 Most Critical Insights</h2>
+    ${top5HTML || '<div style="color:#6B7280;font-size:14px;">No critical insights this period.</div>'}
+  </section>
+
+  ${productSectionsHTML}
+
+  <footer style="margin-top:40px;padding-top:20px;border-top:1px solid #E5E7EB;color:#9CA3AF;font-size:11px;text-align:center;">
+    Generated by Decagon Insights · Perpay Product Team
+  </footer>
+</div>
+</body></html>`;
+
+    const blob = new Blob([html], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `perpay-insights-${archive.weekLabel.replace(/\s+/g, "-").toLowerCase()}.txt`;
+    a.href = url; a.download = `perpay-insights-${archive.weekLabel.replace(/\s+/g, "-").toLowerCase()}.html`;
     a.click(); URL.revokeObjectURL(url);
   };
 
