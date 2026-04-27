@@ -20,125 +20,194 @@ const { useState, useCallback, useRef, useMemo } = React;
 const ISSUE_CATALOG = [
   // ─── MARKETPLACE ───
   { id: "mp-order-denied", product: "Marketplace",
-    theme: "Order denied or not approved",
+    theme: "Order Denied Without Clear Reason",
+    summary: "Customers attempt to place marketplace orders and are denied with no clear explanation. They don't understand what factors led to the denial or what they can do differently.",
+    whyItMatters: "Order denials with no explanation erode trust and drive customers to competitors. Users who experience opaque denials are unlikely to retry, directly impacting GMV.",
+    rootCause: "Approval logic considers multiple risk signals (payment history, account age, order value) but the denial screen shows a generic message with no specifics or next steps.",
     patterns: [/\border\s+(?:was\s+)?(?:denied|rejected|not\s+approved)\b/i, /\bwhy\s+(?:was|did|is)\s+my\s+order\s+(?:denied|rejected)\b/i, /\bcan'?t\s+(?:place|make|submit)\s+(?:an?\s+)?order\b/i, /\bapproval\s+(?:denied|rejected)\b/i, /\border\s+(?:didn'?t|did\s+not)\s+go\s+through\b/i],
-    recommendation: "Surface clear denial reasons at checkout. Show customers what factors led to the decision and what steps they can take to improve approval odds.",
+    recommendation: "Surface clear denial reasons at checkout. Show customers what factors led to the decision and provide specific steps to improve approval odds (e.g. 'Make 2 more on-time payments to unlock this order size').",
     severity: 4 },
   { id: "mp-item-damaged-wrong", product: "Marketplace",
-    theme: "Item arrived damaged, wrong, or defective",
+    theme: "Item Arrived Damaged, Wrong, or Defective",
+    summary: "Customers receive items that are damaged, defective, or different from what they ordered. The resolution flow is unclear, forcing them to contact support.",
+    whyItMatters: "Fulfillment quality issues directly damage brand trust. Customers who receive wrong items and face a difficult resolution process are high churn risk.",
+    rootCause: "Third-party vendor quality control gaps combined with no self-service resolution flow — customers must contact support for any fulfillment issue.",
     patterns: [/\bitem\s+(?:is\s+|was\s+|arrived?\s+|came\s+)?(?:damaged|broken|defective|wrong)\b/i, /\breceived?\s+(?:the\s+)?wrong\s+(?:item|product|size|color)\b/i, /\bwrong\s+(?:item|product|size|color)\s+(?:was\s+)?(?:sent|delivered|received)\b/i, /\b(?:item|product)\s+(?:is\s+)?(?:not\s+what\s+I\s+ordered|different\s+from)\b/i, /\b(?:damaged|broken)\s+(?:when|on)\s+(?:arrival|delivery)\b/i],
-    recommendation: "Streamline the damaged/wrong item resolution flow with photo upload and one-click replacement or refund.",
+    recommendation: "Streamline the damaged/wrong item resolution flow with photo upload and one-click replacement or refund. Add vendor quality scorecards.",
     severity: 3 },
   { id: "mp-return-refund", product: "Marketplace",
-    theme: "Difficulty with returns or refunds",
+    theme: "Refund Not Processed or Return Difficulty",
+    summary: "Customers want to return items or are waiting on refunds that haven't been processed. They lack visibility into refund status and timelines.",
+    whyItMatters: "Refund delays are a top driver of negative sentiment and chargeback risk. Customers who can't get timely refunds lose confidence in the platform.",
+    rootCause: "Refund processing is manual and lacks real-time status tracking. Return eligibility rules are not surfaced clearly at time of purchase.",
     patterns: [/\bhow\s+(?:do\s+I|can\s+I|to)\s+(?:return|get\s+a?\s*refund)\b/i, /\breturn\s+(?:my|this|the)\s+(?:item|order|product)\b/i, /\bwant\s+(?:a\s+|my\s+)?refund\b/i, /\brefund\s+(?:hasn'?t|has\s+not|didn'?t|not)\s+(?:been\s+)?(?:processed|received|posted|issued)\b/i, /\bwhere'?s?\s+my\s+refund\b/i, /\bstill\s+(?:waiting|no)\s+(?:for\s+)?(?:my\s+)?refund\b/i],
-    recommendation: "Reduce refund processing time and provide real-time refund status tracking in the customer dashboard.",
+    recommendation: "Reduce refund processing time and add real-time refund status tracking in the customer dashboard. Show expected refund date at time of return request.",
     severity: 3 },
   { id: "mp-shipping-delay", product: "Marketplace",
-    theme: "Shipping delays or tracking issues",
+    theme: "Shipping Delays or Missing Tracking",
+    summary: "Customers are waiting on orders that haven't shipped or arrived, and tracking information is missing, outdated, or not updating.",
+    whyItMatters: "Shipping uncertainty creates support volume and erodes trust. Customers without tracking visibility assume the worst and consider disputes.",
+    rootCause: "Vendor shipping SLAs are inconsistently enforced. Tracking data integration has gaps where carrier handoffs don't trigger status updates.",
     patterns: [/\border\s+(?:hasn'?t|has\s+not)\s+(?:arrived|shipped|been\s+(?:delivered|shipped))\b/i, /\bwhere'?s?\s+my\s+(?:order|package|item|shipment)\b/i, /\btracking\s+(?:not\s+)?(?:updating|working|showing|available)\b/i, /\b(?:still|been)\s+(?:waiting|pending)\s+(?:for\s+)?(?:my\s+)?(?:order|delivery|shipment)\b/i, /\bshipping\s+(?:is\s+)?(?:taking|took)\s+(?:too\s+)?long\b/i],
-    recommendation: "Improve shipping visibility with proactive delay notifications and real-time tracking updates in the app.",
+    recommendation: "Proactive delay notifications with revised ETAs. Enforce vendor shipping SLAs and surface real-time carrier tracking in the app.",
     severity: 2 },
   { id: "mp-cancel-order", product: "Marketplace",
-    theme: "Unable to cancel or modify order",
+    theme: "Unable to Cancel or Modify Order",
+    summary: "Customers want to cancel or change an order but can't find how, or are told it's too late. The cancellation window and process are unclear.",
+    whyItMatters: "Inability to cancel creates forced purchases that lead to returns, chargebacks, and negative brand sentiment.",
+    rootCause: "No self-service cancellation option exists in the UI. The cancellation window closes immediately after order confirmation with no grace period.",
     patterns: [/\bcancel\s+(?:my|this|the)\s+order\b/i, /\bwant\s+to\s+cancel\b/i, /\bcan'?t\s+cancel\b/i, /\bhow\s+(?:do\s+I|can\s+I|to)\s+cancel\s+(?:my|an?)\s+order\b/i, /\bchange\s+(?:my|the)\s+order\b/i, /\bmodify\s+(?:my|the)\s+order\b/i],
-    recommendation: "Allow order cancellation and modification within a grace window post-purchase and make the option easily accessible.",
+    recommendation: "Allow order cancellation within a 30-minute grace window post-purchase. Add a visible 'Cancel Order' button in order details.",
     severity: 2 },
   { id: "mp-spending-limit-low", product: "Marketplace",
-    theme: "Spending limit too low or decreased",
-    patterns: [/\bspending\s+limit\s+(?:is\s+)?(?:too\s+)?(?:low|small|not\s+enough)\b/i, /\bwhy\s+(?:did|is|was)\s+my\s+(?:spending\s+)?limit\s+(?:so\s+)?(?:low|decrease|drop|go\s+down|reduced)\b/i, /\blimit\s+(?:was\s+|got\s+|has\s+been\s+)?(?:decreased|reduced|lowered|cut)\b/i, /\bincrease\s+(?:my\s+)?(?:spending\s+)?limit\b/i, /\bhow\s+(?:do\s+I|can\s+I|to)\s+(?:get\s+|raise\s+)?(?:a\s+)?(?:higher\s+)?(?:spending\s+)?limit\b/i],
-    recommendation: "Introduce a transparent limit-increase flow. Show what behaviors (on-time payments, tenure) trigger increases and when the next review happens.",
+    theme: "Spending Limit Too Low or Unexpectedly Decreased",
+    summary: "Customers find their marketplace spending limit is too low to make desired purchases, or their limit was reduced without notice or explanation.",
+    whyItMatters: "Spending limits directly gate revenue. Unexplained decreases feel punitive to customers who believe they've been responsible, creating churn risk.",
+    rootCause: "Limit adjustments are driven by risk models that run periodically but don't communicate changes proactively. No in-app explanation is provided when a limit decreases.",
+    patterns: [/\bspending\s+limit\s+(?:is\s+)?(?:too\s+)?(?:low|small|not\s+enough)\b/i, /\bwhy\s+(?:did|is|was)\s+my\s+spending\s+limit\s+(?:so\s+)?(?:low|decrease|drop|go\s+down|reduced)\b/i, /\bspending\s+limit\s+(?:was\s+|got\s+|has\s+been\s+)?(?:decreased|reduced|lowered|cut)\b/i, /\bincrease\s+(?:my\s+)?spending\s+limit\b/i, /\bhow\s+(?:do\s+I|can\s+I|to)\s+(?:get\s+|raise\s+)?(?:a\s+)?(?:higher\s+)?spending\s+limit\b/i],
+    recommendation: "Introduce a transparent limit-increase flow showing what behaviors (on-time payments, tenure) trigger increases. Notify before decreases with clear reasoning.",
     severity: 4 },
   { id: "mp-pricing-overcharge", product: "Marketplace",
-    theme: "Perceived overpricing or unexpected charges on orders",
+    theme: "Unexpected Pricing or Overcharges on Orders",
+    summary: "Customers feel they were charged more than expected, see hidden fees, or don't understand the total at checkout versus what they anticipated.",
+    whyItMatters: "Pricing surprises destroy purchase confidence and increase chargebacks. Customers who feel overcharged are unlikely to make repeat purchases.",
+    rootCause: "Checkout flow does not clearly itemize markup, fees, and interest before final confirmation. Price display on product pages may differ from final charged amount.",
     patterns: [/\bprice\s+(?:is\s+)?(?:too\s+)?(?:high|expensive|much)\b/i, /\bovercharged?\b/i, /\bcharged\s+(?:more|extra|twice|double)\b/i, /\bwhy\s+(?:am\s+I|was\s+I)\s+charged\s+(?:so\s+much|more|extra)\b/i, /\bhidden\s+(?:fees?|charges?|costs?)\b/i],
-    recommendation: "Break down pricing transparently at checkout. Show base price, fees, and any interest or markup clearly before purchase.",
+    recommendation: "Break down pricing transparently at checkout: base price, fees, interest, and total. Add a price-match guarantee or price history indicator.",
     severity: 3 },
 
   // ─── CORE ───
   { id: "core-direct-deposit-issue", product: "Core",
-    theme: "Direct deposit not showing or delayed",
+    theme: "Direct Deposit Not Showing or Delayed",
+    summary: "Customers' direct deposits haven't posted when expected. They are checking their account repeatedly and don't know when to expect funds or why there's a delay.",
+    whyItMatters: "Direct deposit is a core trust signal — when pay doesn't arrive on time, customers question the entire platform's reliability and may switch to a competitor.",
+    rootCause: "Payroll processing schedules vary by employer. Perpay receives ACH files at different times but doesn't surface estimated arrival times to customers.",
     patterns: [/\bdirect\s+deposit\s+(?:hasn'?t|has\s+not|didn'?t|not)\s+(?:been\s+)?(?:posted|deposited|showing|arrived|hit|come|appeared)\b/i, /\bwhere'?s?\s+my\s+(?:direct\s+)?deposit\b/i, /\bdirect\s+deposit\s+(?:is\s+)?(?:late|delayed|missing|pending)\b/i, /\bwhen\s+(?:will|does)\s+(?:my\s+)?direct\s+deposit\s+(?:post|arrive|hit|show)\b/i, /\bmy\s+(?:direct\s+)?deposit\s+(?:is\s+)?not\s+(?:on|in|showing)\b/i, /\bmy\s+(?:paycheck|pay)\s+(?:hasn'?t|didn'?t|not)\s+(?:been\s+)?(?:deposited|posted)\b/i],
-    recommendation: "Provide proactive deposit status updates and estimated arrival times. Surface payroll processing schedules so customers know when to expect funds.",
+    recommendation: "Add a deposit tracker: Expected \u2192 Processing \u2192 Posted. Show employer-specific estimated deposit times and send push notification when deposit lands.",
     severity: 4 },
   { id: "core-payment-issue", product: "Core",
-    theme: "Payment not processing or posting correctly",
+    theme: "Payment Not Processing or Posting",
+    summary: "Customers made a payment but it hasn't been reflected in their balance. Some report double charges or payments stuck in pending status.",
+    whyItMatters: "Payment processing issues create financial anxiety and erode trust. Customers who can't see their payments posted may stop making them or file disputes.",
+    rootCause: "ACH payment processing takes 1-3 business days but no real-time status is shown. Pending transactions display inconsistently across account views.",
     patterns: [/\bpayment\s+(?:didn'?t|did\s+not|hasn'?t|not)\s+(?:go\s+through|process|post|work)\b/i, /\bpayment\s+(?:is\s+)?(?:stuck|pending|failed|declined)\b/i, /\bmade\s+a\s+payment\s+(?:but|and)\s+(?:it\s+)?(?:still|not)\b/i, /\bwhy\s+(?:hasn'?t|didn'?t)\s+my\s+payment\s+(?:posted|processed|gone\s+through)\b/i, /\bdouble\s+(?:charged|payment|deducted)\b/i],
-    recommendation: "Improve real-time payment status visibility. Show processing timelines and send confirmation once payments post.",
+    recommendation: "Show real-time payment status: Submitted \u2192 Processing \u2192 Posted. Send confirmation notifications and add a payment history timeline.",
     severity: 3 },
   { id: "core-account-locked", product: "Core",
-    theme: "Account locked, frozen, or access issues",
+    theme: "Account Locked or Access Restricted",
+    summary: "Customers are locked out of their accounts or find their accounts frozen/suspended. They don't understand why or how to regain access.",
+    whyItMatters: "Account lockouts block all product engagement. Without access, customers can't make payments, check balances, or use any Perpay service — creating immediate churn risk.",
+    rootCause: "Security triggers (failed login attempts, suspicious activity, identity verification gaps) lock accounts but don't communicate the specific reason or unlock path to the customer.",
     patterns: [/\baccount\s+(?:is\s+|was\s+|got\s+|has\s+been\s+)?(?:locked|frozen|suspended|disabled|closed|restricted)\b/i, /\bcan'?t\s+(?:access|log\s*in|sign\s*in|get\s+into)\s+(?:my\s+)?account\b/i, /\blocked\s+out\s+(?:of\s+)?(?:my\s+)?account\b/i, /\bwhy\s+(?:is|was)\s+my\s+account\s+(?:locked|frozen|closed|suspended)\b/i, /\bunlock\s+(?:my\s+)?account\b/i],
-    recommendation: "Clarify account lock reasons with specific in-app messaging and provide a self-service unlock flow where security allows.",
+    recommendation: "Display specific lock reasons with a self-service unlock flow (identity re-verification, password reset). Add proactive notification when an account is about to be locked.",
     severity: 4 },
   { id: "core-autopay-issue", product: "Core",
-    theme: "Autopay not working or unexpected deductions",
+    theme: "Autopay Not Working or Unexpected Deductions",
+    summary: "Customers report autopay not processing as expected, deducting wrong amounts, or being unable to set up or cancel autopay.",
+    whyItMatters: "Autopay issues directly impact payment reliability and customer financial planning. Unexpected deductions damage trust and may trigger overdrafts.",
+    rootCause: "Autopay configuration changes don't take effect immediately due to processing windows. The UI doesn't clearly show the next scheduled deduction date and amount.",
     patterns: [/\bautopay\s+(?:isn'?t|is\s+not|not)\s+(?:working|processing|deducting)\b/i, /\bturn\s+off\s+autopay\b/i, /\bcancel\s+autopay\b/i, /\bstop\s+(?:auto|automatic)\s*(?:pay|payment|deduction)\b/i, /\bautopay\s+(?:took|deducted|charged)\s+(?:too\s+much|more|wrong|extra|twice)\b/i, /\bset\s+up\s+autopay\b/i, /\b(?:auto|automatic)\s*(?:pay|payment)\s+(?:didn'?t|did\s+not)\b/i],
-    recommendation: "Give customers clear autopay controls with real-time confirmation of changes and upcoming deduction previews.",
+    recommendation: "Show upcoming autopay details (date, amount) prominently. Allow instant on/off toggle with immediate confirmation and next-deduction preview.",
     severity: 3 },
   { id: "core-verification", product: "Core",
-    theme: "Identity or account verification difficulties",
+    theme: "Identity or Account Verification Difficulties",
+    summary: "Customers struggle to complete identity or account verification. The process fails, gets stuck, or requires documents they don't understand.",
+    whyItMatters: "Verification friction blocks onboarding and feature access. Customers who can't verify abandon the product before experiencing its value.",
+    rootCause: "Verification flow has unclear document requirements and no progress indicator. Failures show generic error messages without specifying what needs to be corrected.",
     patterns: [/\bverif(?:y|ication)\s+(?:my\s+)?(?:identity|account|income|employment)\b/i, /\bcan'?t\s+(?:verify|complete\s+verification)\b/i, /\bverification\s+(?:failed|not\s+working|keeps?\s+failing|stuck)\b/i, /\bwhy\s+(?:do\s+I|am\s+I)\s+(?:need|required)\s+to\s+verify\b/i, /\bunable\s+to\s+verify\b/i],
-    recommendation: "Simplify the verification flow with clearer document requirements and real-time status updates on verification progress.",
+    recommendation: "Simplify verification with clear document requirements upfront, real-time validation feedback, and a progress tracker: Submitted \u2192 Under Review \u2192 Verified.",
     severity: 2 },
 
   // ─── PERPAY+ ───
   { id: "pp-cancel-subscription", product: "Perpay+",
-    theme: "Wants to cancel Perpay+ subscription",
+    theme: "Wants to Cancel Perpay+ Subscription",
+    summary: "Customers want to cancel their Perpay+ subscription but can't find how, or feel the process is unnecessarily difficult.",
+    whyItMatters: "Cancellation friction creates negative brand sentiment. Customers who feel trapped will leave negative reviews and discourage referrals even after they eventually cancel.",
+    rootCause: "No self-service cancellation option exists — customers must contact support. The subscription value proposition isn't reinforced at the point of cancellation intent.",
     patterns: [/\bcancel\s+(?:my\s+)?(?:perpay\s*\+|perpay\s+plus|subscription|membership)\b/i, /\bunsubscribe\s+(?:from\s+)?(?:perpay\s*\+|perpay\s+plus)\b/i, /\bdon'?t\s+want\s+(?:perpay\s*\+|perpay\s+plus|the\s+subscription)\b/i, /\bstop\s+(?:my\s+)?(?:perpay\s*\+|perpay\s+plus|subscription)\s+(?:charge|payment|fee)\b/i, /\bhow\s+(?:do\s+I|can\s+I|to)\s+cancel\s+(?:perpay\s*\+|perpay\s+plus|my\s+subscription)\b/i],
-    recommendation: "Make cancellation self-service and transparent. Offer a retention flow that explains benefits before confirming cancellation.",
+    recommendation: "Add one-click self-service cancellation with a retention screen showing personalized value (credit score improvement, savings). Offer pause option as alternative.",
     severity: 4 },
   { id: "pp-credit-not-reporting", product: "Perpay+",
-    theme: "Credit reporting not showing on credit report",
+    theme: "Credit Not Reporting to Bureaus",
+    summary: "Customers subscribed to Perpay+ for credit building but their payments aren't appearing on their credit reports. They question whether the service is working.",
+    whyItMatters: "Credit reporting is the core value proposition of Perpay+. When it doesn't show up, customers feel scammed and will cancel — this is the #1 retention risk for the product.",
+    rootCause: "Bureau reporting cycles are monthly with variable timing. No in-app status shows customers when their data was last reported or when the next report is due.",
     patterns: [/\b(?:not|isn'?t|hasn'?t|didn'?t|never)\s+(?:been\s+)?(?:reported?|reporting|show(?:ing|n)?)\s+(?:on|to)\s+(?:my\s+)?(?:credit|bureau|experian|transunion|equifax)\b/i, /\bcredit\s+(?:report|score|bureau)\s+(?:not|isn'?t|hasn'?t|doesn'?t)\s+(?:show|reflect|update)\b/i, /\bwhen\s+(?:will|does)\s+(?:it|perpay)\s+(?:report|show)\s+(?:on|to)\s+(?:my\s+)?credit\b/i, /\bnot\s+(?:seeing|showing)\s+(?:on\s+)?(?:my\s+)?credit\s+report\b/i],
-    recommendation: "Set clear expectations about reporting timelines. Add a reporting status tracker in the Perpay+ dashboard so customers can see when their next report is due.",
+    recommendation: "Add a reporting status tracker: Last Reported \u2192 Next Report Date \u2192 Bureau Confirmation. Send push notification when each report is submitted.",
     severity: 4 },
   { id: "pp-credit-score-drop", product: "Perpay+",
-    theme: "Credit score dropped or not improving",
+    theme: "Credit Score Dropped or Not Improving",
+    summary: "Customers paying for Perpay+ see their credit score drop or not improve. They blame Perpay and question the value of the subscription.",
+    whyItMatters: "Score disappointment leads to cancellations and negative word-of-mouth. Customers who joined specifically for credit building feel betrayed if scores don't improve.",
+    rootCause: "Credit scores are affected by many factors beyond Perpay+ reporting. Customers lack education on what moves their score and have unrealistic timeline expectations.",
     patterns: [/\bcredit\s+score\s+(?:went|dropped?|decreased?|fell|go(?:ne|ing)?\s+down|lower|hasn'?t\s+(?:gone\s+up|improved|changed|increased))\b/i, /\bscore\s+(?:went|dropped?|decreased?|fell)\b/i, /\bwhy\s+(?:did|has|is)\s+my\s+(?:credit\s+)?score\s+(?:drop|decrease|go\s+down|lower)\b/i, /\bperpay\s+(?:hurt|lower|drop|damage)(?:ed|ing|s)?\s+(?:my\s+)?(?:credit|score)\b/i],
-    recommendation: "Educate customers about factors that affect credit scores. Show a personalized credit score trend with explanations for changes.",
+    recommendation: "Show a personalized credit factors breakdown. Educate on typical improvement timelines (3-6 months). Add a score trend chart tied to Perpay+ payment history.",
     severity: 3 },
   { id: "pp-charged-after-cancel", product: "Perpay+",
-    theme: "Still being charged after cancellation request",
+    theme: "Still Charged After Cancellation",
+    summary: "Customers who cancelled Perpay+ are still seeing charges. They believe they were told it was cancelled but deductions continue.",
+    whyItMatters: "Post-cancellation charges are a trust emergency. These customers are likely to file chargebacks, leave 1-star reviews, and report to consumer protection agencies.",
+    rootCause: "Cancellation processing has a lag — requests submitted mid-billing cycle may not take effect until the next cycle. Confirmation messaging is ambiguous about effective dates.",
     patterns: [/\bstill\s+(?:being\s+)?charged?\s+(?:after|even\s+though)\s+(?:I\s+)?cancel/i, /\bcharged?\s+(?:for\s+)?(?:perpay\s*\+|subscription)\s+(?:after|even\s+though)\s+(?:I\s+)?cancel/i, /\bcancel(?:led|ed)?\s+(?:but|and)\s+(?:still|keep)\s+(?:being\s+)?charged?\b/i, /\bwhy\s+(?:am\s+I|was\s+I)\s+(?:still\s+)?(?:being\s+)?charged?\s+(?:for\s+)?(?:perpay\s*\+|the\s+subscription)\b/i],
-    recommendation: "Ensure cancellations are processed immediately with confirmation. Add a post-cancellation receipt showing no future charges.",
+    recommendation: "Process cancellations immediately with a clear confirmation showing the exact last charge date. Auto-refund any charges after the cancellation effective date.",
     severity: 4 },
 
   // ─── CARD ───
   { id: "card-declined", product: "Card",
-    theme: "Card declined at point of sale",
+    theme: "Card Declined at Point of Sale",
+    summary: "Customers' Perpay cards are being declined at merchants. They have available balance but don't understand why the transaction failed.",
+    whyItMatters: "Public declines are embarrassing and create immediate negative product sentiment. Declined customers may stop using the card entirely.",
+    rootCause: "Decline reasons vary (merchant category restrictions, daily limits, fraud holds) but the decline notification shows a generic message. Some holds release slowly.",
     patterns: [/\bcard\s+(?:was\s+|got\s+|keeps?\s+(?:getting\s+)?)?declined\b/i, /\btransaction\s+(?:was\s+)?declined\b/i, /\bcard\s+(?:didn'?t|did\s+not|won'?t|wouldn'?t)\s+work\b/i, /\bwhy\s+(?:was|is|did)\s+my\s+(?:card|transaction)\s+declined\b/i, /\bdeclined\s+(?:at|when|while)\s+(?:the\s+)?(?:store|checkout|register|pump|gas)\b/i],
-    recommendation: "Surface specific decline reasons (insufficient funds, merchant category, fraud hold) in real-time push notifications so customers aren't left guessing.",
+    recommendation: "Send real-time push with specific decline reason (insufficient funds, merchant block, fraud hold). Add a transaction retry button and self-service fraud hold release.",
     severity: 4 },
   { id: "card-interest-confusion", product: "Card",
-    theme: "Confusion about interest charges or APR",
+    theme: "Confusion About Interest Charges or APR",
+    summary: "Customers don't understand their interest charges, didn't know interest would apply, or are surprised by the APR on their statements.",
+    whyItMatters: "Interest confusion erodes trust and creates regulatory risk. Customers who feel blindsided by interest charges are high churn and complaint risk.",
+    rootCause: "APR terms are disclosed at card opening but not reinforced at point of purchase or on statements. Interest calculations are not broken down in a customer-friendly way.",
     patterns: [/\b\d+(?:\.\d+)?\s*%\s*APR\b/, /\bhigh\s+APR\b/i, /\binterest\s+charge(?:s|d)?\b/i, /\bwhy\s+(?:am\s+I|was\s+I)\s+(?:being\s+)?charged\s+(?:so\s+much\s+)?interest\b/i, /\bdidn'?t\s+(?:know|expect|realize)\s+(?:about\s+)?(?:the\s+)?interest\b/i, /\bhow\s+(?:is|does)\s+(?:the\s+)?interest\s+(?:work|calculated|charged)\b/i],
-    recommendation: "Make APR and interest calculations transparent. Show projected interest on the payment screen before charges accrue.",
+    recommendation: "Show projected interest on the payment screen before charges accrue. Add an interest calculator tool and 'pay by this date to avoid interest' prompts.",
     severity: 3 },
   { id: "card-limit-decrease", product: "Card",
-    theme: "Credit limit decreased without explanation",
+    theme: "Credit Limit Decreased Without Explanation",
+    summary: "Customers' credit limits were reduced without warning. They made on-time payments and don't understand why their limit was cut.",
+    whyItMatters: "Unexplained limit decreases feel punitive and break trust at a moment when customers believe they've been responsible. This is a top driver of card abandonment.",
+    rootCause: "Periodic risk model re-evaluation can trigger limit decreases, but no proactive notification or explanation is sent to the customer before or after the change.",
     patterns: [/\bcredit\s+limit\s+(?:was\s+|got\s+|has\s+been\s+)?(?:decreased|reduced|lowered|cut|dropped)\b/i, /\bwhy\s+(?:did|was|is)\s+my\s+(?:credit\s+)?limit\s+(?:decreased|reduced|lowered|cut|drop)\b/i, /\blimit\s+(?:went|go(?:ne|ing)?)\s+down\b/i, /\blower(?:ed)?\s+(?:my\s+)?(?:credit\s+)?limit\b/i],
-    recommendation: "Notify customers proactively before limit changes with clear reasons and steps to restore or increase their limit.",
+    recommendation: "Notify customers before limit changes with specific reasons. Show a path to limit restoration: 'Make X on-time payments to restore your previous limit.'",
     severity: 4 },
   { id: "card-payment-posting", product: "Card",
-    theme: "Card payment not posting or reflecting",
+    theme: "Card Payment Not Posting or Reflecting",
+    summary: "Customers paid their card balance but it's not reflected. Available credit hasn't updated and they can't make new purchases.",
+    whyItMatters: "Payment posting delays block spending and create financial anxiety. Customers who pay and don't see results may stop paying or file disputes.",
+    rootCause: "ACH payments take 1-3 business days to settle. Available credit doesn't update until settlement completes, but no ETA is shown to the customer.",
     patterns: [/\b(?:card\s+)?payment\s+(?:not|isn'?t|hasn'?t)\s+(?:been\s+)?(?:posting|posted|reflecting|reflected|showing|applied)\b/i, /\bpaid\s+(?:my\s+)?card\s+(?:but|and)\s+(?:it\s+)?(?:still|not)\b/i, /\bwhen\s+(?:will|does)\s+(?:my\s+)?(?:card\s+)?payment\s+(?:post|reflect|show|apply)\b/i, /\bmade\s+(?:a\s+)?(?:card\s+)?payment\s+(?:\d+\s+)?(?:days?\s+)?ago\s+(?:and\s+)?(?:still|not)\b/i],
-    recommendation: "Provide real-time payment posting status and expected processing timelines on the card payment screen.",
+    recommendation: "Show payment status tracker: Received \u2192 Processing \u2192 Posted. Provide estimated posting date and release partial available credit upon payment receipt.",
     severity: 3 },
   { id: "card-fraud-unauthorized", product: "Card",
-    theme: "Unauthorized or fraudulent charges on card",
+    theme: "Unauthorized or Fraudulent Card Charges",
+    summary: "Customers see charges they didn't make. They need to report fraud, freeze their card, and get their money back but the process is unclear.",
+    whyItMatters: "Fraud is a trust emergency. Slow resolution or unclear process leads to chargebacks, account closure, and permanent customer loss.",
+    rootCause: "No instant card freeze is available in-app. Dispute filing requires contacting support, and investigation timelines are not communicated upfront.",
     patterns: [/\bunauthorized\s+(?:charge|transaction|purchase|activity)\b/i, /\bfraudulent\s+(?:charge|transaction|activity)\b/i, /\bdidn'?t\s+(?:make|authorize|recognize)\s+(?:this|that|the)\s+(?:charge|transaction|purchase)\b/i, /\bcharge\s+(?:I\s+)?(?:didn'?t|don'?t|never)\s+(?:make|recognize|authorize)\b/i, /\bsomeone\s+(?:else\s+)?(?:used|stole|is\s+using)\s+my\s+card\b/i, /\bcard\s+(?:was\s+)?(?:stolen|compromised|hacked)\b/i],
-    recommendation: "Implement instant card freeze and one-tap dispute filing. Provide faster fraud investigation turnaround with status updates.",
+    recommendation: "Add instant card freeze in-app. One-tap dispute filing with provisional credit within 24 hours. Show investigation timeline: Filed \u2192 Under Review \u2192 Resolved.",
     severity: 4 },
   { id: "card-available-credit-wrong", product: "Card",
-    theme: "Available credit or balance seems incorrect",
+    theme: "Available Credit or Balance Seems Wrong",
+    summary: "Customers believe their available credit or balance is incorrect. It doesn't match their expectations based on payments made and purchases.",
+    whyItMatters: "Balance confusion creates support volume and erodes product trust. Customers who can't trust their balance display won't trust the product.",
+    rootCause: "Available credit includes pending holds, processing payments, and recent purchases that aren't yet itemized. No breakdown is shown to explain the number.",
     patterns: [/\bavailable\s+(?:credit|balance)\s+(?:is\s+)?(?:wrong|incorrect|doesn'?t\s+match|not\s+right|less\s+than|lower\s+than)\b/i, /\bbalance\s+(?:is\s+)?(?:wrong|incorrect|doesn'?t\s+(?:match|look\s+right)|not\s+(?:right|correct|accurate))\b/i, /\bwhy\s+(?:is|does)\s+my\s+(?:available\s+)?(?:credit|balance)\s+(?:show|say|look)\b/i],
-    recommendation: "Show a transparent balance breakdown (pending transactions, recent payments, holds) so customers can see exactly how available credit is calculated.",
+    recommendation: "Show a transparent balance breakdown: Statement Balance - Pending Transactions - Processing Payments = Available Credit. Update in real-time.",
     severity: 3 },
   { id: "card-how-increase-limit", product: "Card",
-    theme: "Requesting credit limit increase",
+    theme: "Requesting Credit Limit Increase",
+    summary: "Customers want a higher credit limit but don't know if they're eligible, how to request one, or what criteria are used.",
+    whyItMatters: "CLI requests signal engaged, growing customers. Failing to provide a clear path loses revenue and may push customers to competitors offering higher limits.",
+    rootCause: "No self-service CLI request flow exists. Eligibility criteria and review timelines are not communicated. Customers accepted a CLI offer but the increase hasn't taken effect.",
     patterns: [/\b(?:increase|raise|higher)\s+(?:my\s+)?(?:credit\s+)?limit\b/i, /\bhow\s+(?:do\s+I|can\s+I|to)\s+(?:get\s+)?(?:a\s+)?(?:higher|more)\s+(?:credit\s+)?(?:limit|line)\b/i, /\brequest(?:ing)?\s+(?:a\s+)?(?:credit\s+)?limit\s+increase\b/i, /\bwant\s+(?:a\s+)?(?:higher|more)\s+(?:credit\s+)?limit\b/i],
-    recommendation: "Build a self-service limit increase request flow. Show customers what factors determine their limit and what they can do to qualify for more.",
+    recommendation: "In-app CLI progress tracker: Eligible \u2192 Request Submitted \u2192 Under Review \u2192 Approved. Show what factors determine eligibility and estimated review time.",
     severity: 2 },
 ];
 
@@ -235,11 +304,29 @@ function analyzeConversations(rows, headerMap) {
       .map(s => s.trim())
       .filter(s => s.length > 10 && s.length < 220 && /[a-zA-Z]/.test(s) && !/^[A-Z][a-z]+:\s/.test(s) && isCustomerSentence(s));
 
+    // Detect which product the conversation is explicitly about
+    const textLower = userText.toLowerCase();
+    const mentionsCard = /\b(?:credit\s+card|perpay\s+card|my\s+card|the\s+card|card\s+(?:was|got|keeps?|didn|won|isn))\b/i.test(userText);
+    const mentionsMarketplace = /\b(?:marketplace|my\s+order|item|shipping|tracking|delivery|checkout|cart)\b/i.test(userText);
+    const mentionsPerpayPlus = /\b(?:perpay\s*\+|perpay\s+plus|subscription|membership|credit\s+(?:building|report|bureau|score)|experian|transunion|equifax)\b/i.test(userText);
+    const mentionsCore = /\b(?:direct\s+deposit|autopay|auto\s*pay|paycheck|payroll|deduction|log\s*in|password|verify\s+(?:my\s+)?(?:identity|account))\b/i.test(userText);
+
     // Test each issue in the catalog
     let matched = false;
     for (const issue of ISSUE_CATALOG) {
       const isMatch = issue.patterns.some(p => p.test(userText));
       if (!isMatch) continue;
+
+      // Product disambiguation: skip if conversation explicitly mentions a DIFFERENT product
+      // than what this theme is categorized under
+      const issueProduct = issue.product;
+      let productMismatch = false;
+      if (issueProduct === "Marketplace" && !mentionsMarketplace && (mentionsCard || mentionsPerpayPlus)) productMismatch = true;
+      if (issueProduct === "Card" && !mentionsCard && mentionsMarketplace) productMismatch = true;
+      if (issueProduct === "Perpay+" && !mentionsPerpayPlus && (mentionsCard || mentionsMarketplace)) productMismatch = true;
+      if (issueProduct === "Core" && !mentionsCore && (mentionsCard || mentionsMarketplace || mentionsPerpayPlus)) productMismatch = true;
+      if (productMismatch) continue;
+
       matched = true;
 
       // Quotes: sentences from THIS conversation that match THIS issue's patterns
@@ -311,39 +398,73 @@ function Badge({ label, color, bg }) {
   return <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 12, fontSize: 11, fontWeight: 600, color, background: bg, whiteSpace: "nowrap" }}>{label}</span>;
 }
 
-function ThemeCard({ theme, rank }) {
+function ThemeCard({ theme, rank, totalConvs }) {
   const [expanded, setExpanded] = useState(false);
   const c = productColors[theme.product];
+  const pct = totalConvs > 0 ? ((theme.count / totalConvs) * 100).toFixed(1) : "0";
 
   return (
-    <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E5E7EB", borderLeft: `4px solid ${c.border}`, marginBottom: 12, padding: "16px 20px", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+    <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #E5E7EB", borderLeft: `4px solid ${c.border}`, marginBottom: 16, padding: "20px 24px", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
         <div style={{ flex: 1, minWidth: 250 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+            <Badge label={theme.product.toUpperCase()} color="#fff" bg={c.badge} />
             {rank && <Badge label={`#${rank} CRITICAL`} color="#fff" bg="#DC2626" />}
-            <Badge label={theme.frequency} color="#fff" bg={freqColors[theme.frequency]} />
-            <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 500 }}>{theme.count} conversation{theme.count !== 1 ? "s" : ""}</span>
           </div>
-          <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#111827", lineHeight: 1.35 }}>{theme.theme}</h4>
+          <h4 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: "#111827", lineHeight: 1.35 }}>{theme.theme}</h4>
+        </div>
+        <div style={{ textAlign: "right", minWidth: 100 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: freqColors[theme.frequency] }}>{theme.count} convos &middot; {pct}%</div>
+          <div style={{ fontSize: 10, color: "#9CA3AF" }}>of week's volume</div>
         </div>
       </div>
 
+      {/* Summary */}
+      {theme.summary && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 4 }}>Summary</div>
+          <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6 }}>{theme.summary}</div>
+        </div>
+      )}
+
+      {/* Customer Signals */}
       {theme.quotes.length > 0 && (
-        <div style={{ marginTop: 10 }}>
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 6 }}>Customer Signals</div>
           {theme.quotes.map((q, i) => (
-            <div key={i} style={{ background: c.bg, borderLeft: `3px solid ${c.border}`, padding: "6px 12px", marginBottom: 4, borderRadius: "0 6px 6px 0", fontSize: 12, color: "#374151", fontStyle: "italic", lineHeight: 1.5 }}>
-              "{q}"
+            <div key={i} style={{ background: c.bg, borderLeft: `3px solid ${c.border}`, padding: "8px 14px", marginBottom: 5, borderRadius: "0 6px 6px 0", fontSize: 13, color: "#374151", fontStyle: "italic", lineHeight: 1.55 }}>
+              &ldquo;{q}&rdquo;
             </div>
           ))}
         </div>
       )}
 
-      <div style={{ background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 6, padding: "8px 12px", marginTop: 10 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: "#166534", marginBottom: 2, textTransform: "uppercase", letterSpacing: 0.5 }}>Recommendation</div>
-        <div style={{ fontSize: 12, color: "#15803D", lineHeight: 1.5 }}>{theme.recommendation}</div>
+      {/* Why This Matters + Root Cause */}
+      {(theme.whyItMatters || theme.rootCause) && (
+        <div style={{ display: "grid", gridTemplateColumns: theme.whyItMatters && theme.rootCause ? "1fr 1fr" : "1fr", gap: 12, marginBottom: 14 }}>
+          {theme.whyItMatters && (
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#92400E", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 4 }}>Why This Matters</div>
+              <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.55 }}>{theme.whyItMatters}</div>
+            </div>
+          )}
+          {theme.rootCause && (
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#4338CA", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 4 }}>Root Cause Hypothesis</div>
+              <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.55 }}>{theme.rootCause}</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Opportunity */}
+      <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, padding: "10px 14px", marginBottom: 12 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#1E40AF", marginBottom: 3, textTransform: "uppercase", letterSpacing: 0.6 }}>Opportunity</div>
+        <div style={{ fontSize: 13, color: "#1E3A5F", lineHeight: 1.55 }}>{theme.recommendation}</div>
       </div>
 
-      <button onClick={() => setExpanded(!expanded)} style={{ marginTop: 10, background: "none", border: `1px solid ${c.border}44`, borderRadius: 6, padding: "3px 10px", fontSize: 11, color: c.text, cursor: "pointer", fontWeight: 500 }}>
+      <button onClick={() => setExpanded(!expanded)} style={{ background: "none", border: `1px solid ${c.border}44`, borderRadius: 6, padding: "4px 12px", fontSize: 11, color: c.text, cursor: "pointer", fontWeight: 500 }}>
         {expanded ? "Hide" : "View"} {theme.count} source conversation{theme.count !== 1 ? "s" : ""}
       </button>
 
@@ -355,7 +476,7 @@ function ThemeCard({ theme, rank }) {
                 <span style={{ fontWeight: 600, color: "#111827", fontSize: 11 }}>ID: {conv.id}</span>
                 {conv.date && <span style={{ fontSize: 10, color: "#9CA3AF" }}>{conv.date}</span>}
               </div>
-              <div>{conv.excerpt}{conv.text.length > 280 ? "..." : ""}</div>
+              <div>{conv.excerpt}{conv.text && conv.text.length > 280 ? "..." : ""}</div>
             </div>
           ))}
         </div>
@@ -364,7 +485,7 @@ function ThemeCard({ theme, rank }) {
   );
 }
 
-function ProductSection({ product, themes }) {
+function ProductSection({ product, themes, totalConvs }) {
   const c = productColors[product];
   if (themes.length === 0) {
     return (
@@ -389,7 +510,7 @@ function ProductSection({ product, themes }) {
           {themes.reduce((s, t) => s + t.count, 0)} conversations
         </span>
       </div>
-      {themes.map((t, i) => <ThemeCard key={t.id} theme={t} />)}
+      {themes.map((t, i) => <ThemeCard key={t.id} theme={t} totalConvs={totalConvs} />)}
     </div>
   );
 }
@@ -519,7 +640,7 @@ function InsightsTab({ analysis, onSaveToArchive }) {
       {analysis.top5.length > 0 && (
         <div style={{ background: "#FEF2F2", borderRadius: 12, padding: "18px 22px", marginBottom: 28, border: "1px solid #FECACA" }}>
           <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 800, color: "#991B1B" }}>{"\uD83D\uDEA8"} Top 5 Most Critical Insights</h3>
-          {analysis.top5.map((theme, i) => <ThemeCard key={theme.id} theme={theme} rank={i + 1} />)}
+          {analysis.top5.map((theme, i) => <ThemeCard key={theme.id} theme={theme} rank={i + 1} totalConvs={analysis.total} />)}
         </div>
       )}
 
@@ -541,7 +662,7 @@ function InsightsTab({ analysis, onSaveToArchive }) {
       {/* Product-first breakdown */}
       <h3 style={{ fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 16 }}>Themes by Product</h3>
       {PRODUCT_ORDER.filter(p => filter === "All" || filter === p).map(p => (
-        <ProductSection key={p} product={p} themes={analysis.byProduct[p] || []} />
+        <ProductSection key={p} product={p} themes={analysis.byProduct[p] || []} totalConvs={analysis.total} />
       ))}
     </div>
   );
@@ -556,29 +677,35 @@ function ArchiveTab({ archives, onDelete }) {
     const freqColor = (f) => f === "High" ? "#DC2626" : f === "Medium" ? "#D97706" : "#059669";
     const freqBg = (f) => f === "High" ? "#FEE2E2" : f === "Medium" ? "#FEF3C7" : "#D1FAE5";
 
+    const total = archive.analysis.total || 1;
     const themeCardHTML = (t, rank) => {
       const c = productColors[t.product] || productColors["Core"];
+      const pct = ((t.count / total) * 100).toFixed(1);
       const quotesHTML = (t.quotes || []).map(q => `
         <div style="background:#F9FAFB;border-left:3px solid ${c.border};padding:10px 14px;margin:8px 0;border-radius:4px;font-style:italic;color:#374151;font-size:13px;line-height:1.5;">
           &ldquo;${esc(q)}&rdquo;
         </div>`).join("");
       return `
-      <div style="background:#fff;border:1px solid #E5E7EB;border-left:4px solid ${c.border};border-radius:10px;padding:18px 20px;margin-bottom:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;flex-wrap:wrap;">
+      <div style="background:#fff;border:1px solid #E5E7EB;border-left:4px solid ${c.border};border-radius:10px;padding:20px 24px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
           <div style="flex:1;min-width:260px;">
-            ${rank ? `<div style="font-size:11px;font-weight:700;color:#6366F1;margin-bottom:4px;">#${rank} CRITICAL</div>` : ""}
-            <div style="font-size:16px;font-weight:700;color:#111827;line-height:1.3;">${esc(t.theme)}</div>
-            <div style="margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">
-              <span style="display:inline-block;background:${c.badge};color:#fff;font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;">${c.icon} ${esc(t.product)}</span>
-              <span style="display:inline-block;background:${freqBg(t.frequency)};color:${freqColor(t.frequency)};font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;">${esc(t.frequency)} Frequency</span>
-              <span style="display:inline-block;background:#F3F4F6;color:#4B5563;font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;">${t.count} conversation${t.count === 1 ? "" : "s"}</span>
+            <div style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap;">
+              <span style="display:inline-block;background:${c.badge};color:#fff;font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;">${esc(t.product.toUpperCase())}</span>
+              ${rank ? `<span style="display:inline-block;background:#DC2626;color:#fff;font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;">#${rank} CRITICAL</span>` : ""}
             </div>
+            <div style="font-size:17px;font-weight:700;color:#111827;line-height:1.35;">${esc(t.theme)}</div>
+          </div>
+          <div style="text-align:right;min-width:100px;">
+            <div style="font-size:13px;font-weight:700;color:${freqColor(t.frequency)};">${t.count} convos &middot; ${pct}%</div>
+            <div style="font-size:10px;color:#9CA3AF;">of week's volume</div>
           </div>
         </div>
-        ${quotesHTML ? `<div style="margin-top:10px;"><div style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Customer Signals</div>${quotesHTML}</div>` : ""}
-        <div style="margin-top:12px;background:${c.bg};border-radius:6px;padding:10px 14px;">
-          <div style="font-size:11px;font-weight:700;color:${c.text};text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Recommendation</div>
-          <div style="font-size:13px;color:${c.text};line-height:1.5;">${esc(t.recommendation)}</div>
+        ${t.summary ? `<div style="margin-bottom:14px;"><div style="font-size:10px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">Summary</div><div style="font-size:13px;color:#374151;line-height:1.6;">${esc(t.summary)}</div></div>` : ""}
+        ${quotesHTML ? `<div style="margin-bottom:14px;"><div style="font-size:10px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:6px;">Customer Signals</div>${quotesHTML}</div>` : ""}
+        ${(t.whyItMatters || t.rootCause) ? `<div style="display:grid;grid-template-columns:${t.whyItMatters && t.rootCause ? '1fr 1fr' : '1fr'};gap:12px;margin-bottom:14px;">${t.whyItMatters ? `<div><div style="font-size:10px;font-weight:700;color:#92400E;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">Why This Matters</div><div style="font-size:12px;color:#374151;line-height:1.55;">${esc(t.whyItMatters)}</div></div>` : ''}${t.rootCause ? `<div><div style="font-size:10px;font-weight:700;color:#4338CA;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:4px;">Root Cause Hypothesis</div><div style="font-size:12px;color:#374151;line-height:1.55;">${esc(t.rootCause)}</div></div>` : ''}</div>` : ''}
+        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:10px 14px;">
+          <div style="font-size:10px;font-weight:700;color:#1E40AF;margin-bottom:3px;text-transform:uppercase;letter-spacing:0.6px;">Opportunity</div>
+          <div style="font-size:13px;color:#1E3A5F;line-height:1.55;">${esc(t.recommendation)}</div>
         </div>
       </div>`;
     };
