@@ -1,13 +1,17 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"/><title>Decagon Insights — Perpay</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Decagon Insights</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-<style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#F9FAFB;}</style>
-</head><body><div id="root"></div>
-<script type="text/babel" data-presets="react">
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
 const { useState, useCallback, useRef, useMemo } = React;
 
 
@@ -20,60 +24,60 @@ const { useState, useCallback, useRef, useMemo } = React;
 const ISSUE_CATALOG = [
   // ─── MARKETPLACE ───
   { id: "mp-order-denied", product: "Marketplace",
-    theme: "Order Denied Without Clear Reason",
-    summary: "Customers attempt to place marketplace orders and are denied with no clear explanation. They don't understand what factors led to the denial or what they can do differently.",
-    whyItMatters: "Order denials with no explanation erode trust and drive customers to competitors. Users who experience opaque denials are unlikely to retry, directly impacting GMV.",
-    rootCause: "Approval logic considers multiple risk signals (payment history, account age, order value) but the denial screen shows a generic message with no specifics or next steps.",
+    theme: "Order Denied / Approval Blocked Without Explanation",
+    summary: "Customers attempt to place marketplace orders and are denied with no clear explanation. They receive a generic 'not approved' message with no detail on why or what to do next. Top sub-tags: Order Approval, Spending Limit, Account Eligibility. A significant portion of these conversations escalate to human agents because the AI cannot override approvals.",
+    whyItMatters: "Order denials with no explanation erode trust and directly reduce GMV. Customers who experience opaque denials are unlikely to retry and may leave negative reviews. This is the highest-friction point in the marketplace purchase funnel.",
+    rootCause: "Approval logic considers multiple risk signals (payment history, account age, order value, outstanding balance) but the denial screen shows a single generic message. The approval engine returns a reason code internally but this is not surfaced to the customer or support agent.",
     patterns: [/\border\s+(?:was\s+)?(?:denied|rejected|not\s+approved)\b/i, /\bwhy\s+(?:was|did|is)\s+my\s+order\s+(?:denied|rejected)\b/i, /\bcan'?t\s+(?:place|make|submit)\s+(?:an?\s+)?order\b/i, /\bapproval\s+(?:denied|rejected)\b/i, /\border\s+(?:didn'?t|did\s+not)\s+go\s+through\b/i],
-    recommendation: "Surface clear denial reasons at checkout. Show customers what factors led to the decision and provide specific steps to improve approval odds (e.g. 'Make 2 more on-time payments to unlock this order size').",
+    recommendation: "Immediate: Map internal reason codes to customer-facing denial messages with specific next steps. Medium-term: Build an approval status page showing eligibility factors (payment history, balance, tenure) with a clear path to approval. Add a 'Check Eligibility' pre-check before order submission.",
     severity: 4 },
   { id: "mp-item-damaged-wrong", product: "Marketplace",
     theme: "Item Arrived Damaged, Wrong, or Defective",
-    summary: "Customers receive items that are damaged, defective, or different from what they ordered. The resolution flow is unclear, forcing them to contact support.",
-    whyItMatters: "Fulfillment quality issues directly damage brand trust. Customers who receive wrong items and face a difficult resolution process are high churn risk.",
-    rootCause: "Third-party vendor quality control gaps combined with no self-service resolution flow — customers must contact support for any fulfillment issue.",
+    summary: "Customers receive items that are damaged on arrival, a different size/color than ordered, or defective out of the box. No self-service resolution exists — they must contact support for every fulfillment issue. Top sub-tags: Wrong Item, Damaged Package, Size/Color Mismatch.",
+    whyItMatters: "Fulfillment quality issues directly damage brand trust and drive returns that cost margin. Customers who receive wrong items and face a difficult resolution process are among the highest churn risk in marketplace.",
+    rootCause: "Third-party vendor quality control is not systematically enforced. No photo-based claim flow exists — every damaged item requires a full support conversation. Return label generation is manual.",
     patterns: [/\bitem\s+(?:is\s+|was\s+|arrived?\s+|came\s+)?(?:damaged|broken|defective|wrong)\b/i, /\breceived?\s+(?:the\s+)?wrong\s+(?:item|product|size|color)\b/i, /\bwrong\s+(?:item|product|size|color)\s+(?:was\s+)?(?:sent|delivered|received)\b/i, /\b(?:item|product)\s+(?:is\s+)?(?:not\s+what\s+I\s+ordered|different\s+from)\b/i, /\b(?:damaged|broken)\s+(?:when|on)\s+(?:arrival|delivery)\b/i],
-    recommendation: "Streamline the damaged/wrong item resolution flow with photo upload and one-click replacement or refund. Add vendor quality scorecards.",
+    recommendation: "Immediate: Add photo-based claim flow with auto-generated return labels. Medium-term: Build vendor quality scorecards and enforce fulfillment SLAs. Add self-service resolution (replacement vs. refund) without requiring support contact.",
     severity: 3 },
   { id: "mp-return-refund", product: "Marketplace",
-    theme: "Refund Not Processed or Return Difficulty",
-    summary: "Customers want to return items or are waiting on refunds that haven't been processed. They lack visibility into refund status and timelines.",
-    whyItMatters: "Refund delays are a top driver of negative sentiment and chargeback risk. Customers who can't get timely refunds lose confidence in the platform.",
-    rootCause: "Refund processing is manual and lacks real-time status tracking. Return eligibility rules are not surfaced clearly at time of purchase.",
+    theme: "Refund Not Processed or Return Blocked",
+    summary: "Customers are waiting on refunds that haven't posted days or weeks after being promised, or can't initiate returns at all. They have no visibility into refund status or timeline. Top sub-tags: Refund Timing, Return Process, Refund Not Received.",
+    whyItMatters: "Refund delays are a top driver of chargebacks and BBB complaints. Customers who can't get timely refunds lose confidence and are unlikely to make future purchases. Each delayed refund is a potential dispute.",
+    rootCause: "Refund processing is manual with no SLA enforcement. The UI shows 'refund initiated' but the actual refund may not process for 5-10 business days. No real-time status tracking exists — customers must contact support repeatedly to check.",
     patterns: [/\bhow\s+(?:do\s+I|can\s+I|to)\s+(?:return|get\s+a?\s*refund)\b/i, /\breturn\s+(?:my|this|the)\s+(?:item|order|product)\b/i, /\bwant\s+(?:a\s+|my\s+)?refund\b/i, /\brefund\s+(?:hasn'?t|has\s+not|didn'?t|not)\s+(?:been\s+)?(?:processed|received|posted|issued)\b/i, /\bwhere'?s?\s+my\s+refund\b/i, /\bstill\s+(?:waiting|no)\s+(?:for\s+)?(?:my\s+)?refund\b/i],
-    recommendation: "Reduce refund processing time and add real-time refund status tracking in the customer dashboard. Show expected refund date at time of return request.",
+    recommendation: "Immediate: Add refund status tracker (Requested \u2192 Processing \u2192 Completed) with estimated date. Medium-term: Enforce 3-business-day refund SLA. Auto-send refund confirmation email with transaction details when funds are released.",
     severity: 3 },
   { id: "mp-shipping-delay", product: "Marketplace",
     theme: "Shipping Delays or Missing Tracking",
-    summary: "Customers are waiting on orders that haven't shipped or arrived, and tracking information is missing, outdated, or not updating.",
-    whyItMatters: "Shipping uncertainty creates support volume and erodes trust. Customers without tracking visibility assume the worst and consider disputes.",
-    rootCause: "Vendor shipping SLAs are inconsistently enforced. Tracking data integration has gaps where carrier handoffs don't trigger status updates.",
+    summary: "Customers are waiting on orders that haven't shipped or arrived, and tracking information is missing, outdated, or not updating. Some report tracking numbers that never activate or show no movement for days. Top sub-tags: Order Status, Tracking Update, Delivery ETA.",
+    whyItMatters: "Shipping uncertainty is the #1 driver of 'where is my order' support volume. Customers without tracking visibility assume the worst, consider disputes, and are unlikely to reorder. Prolonged uncertainty also increases chargeback risk as customers assume non-delivery.",
+    rootCause: "Vendor shipping SLAs are inconsistently enforced — some vendors don't upload tracking within 48 hours. Tracking data integration has gaps where carrier handoffs (e.g., USPS to local post) don't trigger status updates. The app shows 'shipped' as soon as a label is created, even before the carrier has the package.",
     patterns: [/\border\s+(?:hasn'?t|has\s+not)\s+(?:arrived|shipped|been\s+(?:delivered|shipped))\b/i, /\bwhere'?s?\s+my\s+(?:order|package|item|shipment)\b/i, /\btracking\s+(?:not\s+)?(?:updating|working|showing|available)\b/i, /\b(?:still|been)\s+(?:waiting|pending)\s+(?:for\s+)?(?:my\s+)?(?:order|delivery|shipment)\b/i, /\bshipping\s+(?:is\s+)?(?:taking|took)\s+(?:too\s+)?long\b/i],
-    recommendation: "Proactive delay notifications with revised ETAs. Enforce vendor shipping SLAs and surface real-time carrier tracking in the app.",
+    recommendation: "Immediate: Send proactive delay notifications with revised ETAs when tracking stalls for 48+ hours. Distinguish 'label created' from 'in transit' in the UI. Medium-term: Enforce vendor shipping SLAs (ship within 3 business days or auto-cancel with refund). Surface real-time carrier tracking with map view in the app.",
     severity: 2 },
   { id: "mp-cancel-order", product: "Marketplace",
-    theme: "Unable to Cancel or Modify Order",
-    summary: "Customers want to cancel or change an order but can't find how, or are told it's too late. The cancellation window and process are unclear.",
-    whyItMatters: "Inability to cancel creates forced purchases that lead to returns, chargebacks, and negative brand sentiment.",
-    rootCause: "No self-service cancellation option exists in the UI. The cancellation window closes immediately after order confirmation with no grace period.",
+    theme: "Order Cancellation Blocked / Not Confirmed",
+    summary: "Customers attempting to cancel orders are either unable to complete cancellation through the app, receive no confirmation the cancellation processed, or continue to be charged after believing they cancelled. 'Cancelled' status in the UI does not reliably match backend state. Top sub-tags: Order Cancellation, Order Inquiries.",
+    whyItMatters: "Unconfirmed cancellations drive chargebacks, BBB complaints, and 'fraud/theft' accusations on public review platforms. This is the highest direct reputational and retention risk in the product.",
+    rootCause: "The cancellation flow lacks a definitive confirmed state \u2014 customers complete the action but receive no timestamped confirmation. Backend cancellation processing lags behind the UI response, causing charges to still process.",
     patterns: [/\bcancel\s+(?:my|this|the)\s+order\b/i, /\bwant\s+to\s+cancel\b/i, /\bcan'?t\s+cancel\b/i, /\bhow\s+(?:do\s+I|can\s+I|to)\s+cancel\s+(?:my|an?)\s+order\b/i, /\bchange\s+(?:my|the)\s+order\b/i, /\bmodify\s+(?:my|the)\s+order\b/i],
-    recommendation: "Allow order cancellation within a 30-minute grace window post-purchase. Add a visible 'Cancel Order' button in order details.",
+    recommendation: "Immediate: Add explicit cancellation confirmation screen with order ID + timestamp. Auto-send cancellation email/push. Medium-term: Build a cancellation status tracker (Requested \u2192 Processing \u2192 Confirmed). Audit backend cancel-to-billing cutoff timing.",
     severity: 2 },
   { id: "mp-spending-limit-low", product: "Marketplace",
     theme: "Spending Limit Too Low or Unexpectedly Decreased",
-    summary: "Customers find their marketplace spending limit is too low to make desired purchases, or their limit was reduced without notice or explanation.",
-    whyItMatters: "Spending limits directly gate revenue. Unexplained decreases feel punitive to customers who believe they've been responsible, creating churn risk.",
-    rootCause: "Limit adjustments are driven by risk models that run periodically but don't communicate changes proactively. No in-app explanation is provided when a limit decreases.",
+    summary: "Customers find their marketplace spending limit is too low to make desired purchases, or their limit was reduced without notice or explanation. Many report limits dropping after consistent on-time payments, which feels contradictory. Top sub-tags: Spending Limit, Limit Decrease, Approval Eligibility.",
+    whyItMatters: "Spending limits directly gate GMV — every customer blocked from a purchase is lost revenue. Unexplained decreases feel punitive to customers who believe they've been responsible, creating immediate churn risk. This is one of the most emotionally charged themes: customers feel 'punished for doing nothing wrong.'",
+    rootCause: "Limit adjustments are driven by risk models that run periodically (not in real-time) and factor in external credit data, payment history, and employer stability. The models can decrease limits even when Perpay-specific behavior is good. No in-app explanation or advance notice is provided when a limit changes.",
     patterns: [/\bspending\s+limit\s+(?:is\s+)?(?:too\s+)?(?:low|small|not\s+enough)\b/i, /\bwhy\s+(?:did|is|was)\s+my\s+spending\s+limit\s+(?:so\s+)?(?:low|decrease|drop|go\s+down|reduced)\b/i, /\bspending\s+limit\s+(?:was\s+|got\s+|has\s+been\s+)?(?:decreased|reduced|lowered|cut)\b/i, /\bincrease\s+(?:my\s+)?spending\s+limit\b/i, /\bhow\s+(?:do\s+I|can\s+I|to)\s+(?:get\s+|raise\s+)?(?:a\s+)?(?:higher\s+)?spending\s+limit\b/i],
-    recommendation: "Introduce a transparent limit-increase flow showing what behaviors (on-time payments, tenure) trigger increases. Notify before decreases with clear reasoning.",
+    recommendation: "Immediate: Add pre-decrease notification with clear reasoning (e.g., 'Your limit was adjusted based on updated payment data'). Show current limit factors in-app. Medium-term: Build a transparent limit-increase flow showing specific behaviors (on-time payments, tenure milestones, direct deposit consistency) that trigger increases, with a progress tracker toward the next increase.",
     severity: 4 },
   { id: "mp-pricing-overcharge", product: "Marketplace",
     theme: "Unexpected Pricing or Overcharges on Orders",
-    summary: "Customers feel they were charged more than expected, see hidden fees, or don't understand the total at checkout versus what they anticipated.",
-    whyItMatters: "Pricing surprises destroy purchase confidence and increase chargebacks. Customers who feel overcharged are unlikely to make repeat purchases.",
-    rootCause: "Checkout flow does not clearly itemize markup, fees, and interest before final confirmation. Price display on product pages may differ from final charged amount.",
+    summary: "Customers feel they were charged more than expected, see hidden fees, or don't understand the total at checkout versus what they anticipated. Some report being charged a different amount than what was displayed on the product page. Top sub-tags: Price Discrepancy, Hidden Fees, Double Charge.",
+    whyItMatters: "Pricing surprises destroy purchase confidence and are a leading driver of chargebacks and BBB complaints. Customers who feel overcharged are unlikely to make repeat purchases and frequently use language like 'scam' and 'rip-off' in conversations, creating reputational risk.",
+    rootCause: "Checkout flow does not clearly itemize the Perpay markup, installment cost breakdown, and any fees before final confirmation. Product page price shows the base price, but the final payroll-deduction total (including Perpay's margin) can be significantly higher. No side-by-side comparison of retail price vs. Perpay total is provided.",
     patterns: [/\bprice\s+(?:is\s+)?(?:too\s+)?(?:high|expensive|much)\b/i, /\bovercharged?\b/i, /\bcharged\s+(?:more|extra|twice|double)\b/i, /\bwhy\s+(?:am\s+I|was\s+I)\s+charged\s+(?:so\s+much|more|extra)\b/i, /\bhidden\s+(?:fees?|charges?|costs?)\b/i],
-    recommendation: "Break down pricing transparently at checkout: base price, fees, interest, and total. Add a price-match guarantee or price history indicator.",
+    recommendation: "Immediate: Break down pricing transparently at checkout — base retail price, Perpay cost, per-paycheck deduction amount, and total cost over time. Medium-term: Add a total-cost-of-ownership comparison on product pages showing Perpay price vs. retail price. Consider a price transparency badge for items within 10% of retail.",
     severity: 3 },
 
   // ─── CORE ───
@@ -87,11 +91,11 @@ const ISSUE_CATALOG = [
     severity: 4 },
   { id: "core-payment-issue", product: "Core",
     theme: "Payment Not Processing or Posting",
-    summary: "Customers made a payment but it hasn't been reflected in their balance. Some report double charges or payments stuck in pending status.",
-    whyItMatters: "Payment processing issues create financial anxiety and erode trust. Customers who can't see their payments posted may stop making them or file disputes.",
-    rootCause: "ACH payment processing takes 1-3 business days but no real-time status is shown. Pending transactions display inconsistently across account views.",
+    summary: "Customers made a payment but it hasn't been reflected in their balance. Some report double charges, payments stuck in 'pending' for days, or payments that appear to fail silently. They have no way to confirm whether a payment actually went through. Top sub-tags: Payment Status, Double Charge, Payment Failed.",
+    whyItMatters: "Payment processing issues create acute financial anxiety — customers don't know if their money was taken or if they still owe. This drives repeat contact (customers calling back to check status), increases dispute volume, and can cause customers to stop making payments entirely out of confusion.",
+    rootCause: "ACH payment processing takes 1-3 business days but the UI shows no intermediate status between 'submitted' and 'posted.' When payments fail, the failure notification is often delayed or absent. The balance view doesn't distinguish between cleared and pending amounts, so customers can't reconcile what they paid vs. what the system shows.",
     patterns: [/\bpayment\s+(?:didn'?t|did\s+not|hasn'?t|not)\s+(?:go\s+through|process|post|work)\b/i, /\bpayment\s+(?:is\s+)?(?:stuck|pending|failed|declined)\b/i, /\bmade\s+a\s+payment\s+(?:but|and)\s+(?:it\s+)?(?:still|not)\b/i, /\bwhy\s+(?:hasn'?t|didn'?t)\s+my\s+payment\s+(?:posted|processed|gone\s+through)\b/i, /\bdouble\s+(?:charged|payment|deducted)\b/i],
-    recommendation: "Show real-time payment status: Submitted \u2192 Processing \u2192 Posted. Send confirmation notifications and add a payment history timeline.",
+    recommendation: "Immediate: Show real-time payment status tracker: Submitted \u2192 Processing \u2192 Posted with estimated posting date. Send push/email confirmation at each stage. Medium-term: Add a payment history timeline with clear cleared vs. pending indicators. Auto-detect and flag potential double payments before processing.",
     severity: 3 },
   { id: "core-account-locked", product: "Core",
     theme: "Account Locked or Access Restricted",
@@ -103,111 +107,111 @@ const ISSUE_CATALOG = [
     severity: 4 },
   { id: "core-autopay-issue", product: "Core",
     theme: "Autopay Not Working or Unexpected Deductions",
-    summary: "Customers report autopay not processing as expected, deducting wrong amounts, or being unable to set up or cancel autopay.",
-    whyItMatters: "Autopay issues directly impact payment reliability and customer financial planning. Unexpected deductions damage trust and may trigger overdrafts.",
-    rootCause: "Autopay configuration changes don't take effect immediately due to processing windows. The UI doesn't clearly show the next scheduled deduction date and amount.",
+    summary: "Customers report autopay not processing as expected, deducting the wrong amount, or being unable to set up or cancel autopay. Some discover autopay was still active after they believed it was turned off. Others report overdrafts caused by unexpected deduction timing. Top sub-tags: Autopay Setup, Autopay Cancellation, Wrong Deduction Amount.",
+    whyItMatters: "Autopay issues directly impact customer financial stability — unexpected deductions can trigger bank overdraft fees, creating real financial harm and severe trust damage. Customers who experience autopay problems are likely to disconnect their bank entirely, eliminating Perpay's most reliable payment channel.",
+    rootCause: "Autopay configuration changes don't take effect immediately due to processing windows — a cancellation submitted after the cutoff date still triggers the next deduction. The UI shows 'autopay off' immediately even if the next payment is already queued. No clear display of the next scheduled deduction date, amount, and cutoff deadline for changes.",
     patterns: [/\bautopay\s+(?:isn'?t|is\s+not|not)\s+(?:working|processing|deducting)\b/i, /\bturn\s+off\s+autopay\b/i, /\bcancel\s+autopay\b/i, /\bstop\s+(?:auto|automatic)\s*(?:pay|payment|deduction)\b/i, /\bautopay\s+(?:took|deducted|charged)\s+(?:too\s+much|more|wrong|extra|twice)\b/i, /\bset\s+up\s+autopay\b/i, /\b(?:auto|automatic)\s*(?:pay|payment)\s+(?:didn'?t|did\s+not)\b/i],
-    recommendation: "Show upcoming autopay details (date, amount) prominently. Allow instant on/off toggle with immediate confirmation and next-deduction preview.",
+    recommendation: "Immediate: Show upcoming autopay details prominently — next deduction date, amount, and change cutoff deadline. Send confirmation when autopay is toggled on/off with effective date. Medium-term: Allow instant on/off toggle with real-time queue cancellation (not next-cycle). Add a pre-deduction reminder notification 2 days before each scheduled payment.",
     severity: 3 },
   { id: "core-verification", product: "Core",
     theme: "Identity or Account Verification Difficulties",
-    summary: "Customers struggle to complete identity or account verification. The process fails, gets stuck, or requires documents they don't understand.",
-    whyItMatters: "Verification friction blocks onboarding and feature access. Customers who can't verify abandon the product before experiencing its value.",
-    rootCause: "Verification flow has unclear document requirements and no progress indicator. Failures show generic error messages without specifying what needs to be corrected.",
+    summary: "Customers struggle to complete identity or account verification. The process fails repeatedly, gets stuck with no progress indicator, or requires documents they don't have or don't understand. Some report submitting documents multiple times with no feedback on what was wrong. Top sub-tags: Identity Verification, Document Upload, Verification Failed.",
+    whyItMatters: "Verification friction blocks onboarding and feature access — every customer who can't verify is a customer who never experiences the product's value. This is a critical top-of-funnel leak. Customers who fail verification multiple times rarely retry, resulting in permanent acquisition loss.",
+    rootCause: "Verification flow has unclear document requirements upfront (customers don't know which IDs are accepted). Failures show generic error messages ('verification failed') without specifying what was wrong (blurry image, expired ID, name mismatch). No progress indicator exists — customers submit and wait with no ETA or status updates.",
     patterns: [/\bverif(?:y|ication)\s+(?:my\s+)?(?:identity|account|income|employment)\b/i, /\bcan'?t\s+(?:verify|complete\s+verification)\b/i, /\bverification\s+(?:failed|not\s+working|keeps?\s+failing|stuck)\b/i, /\bwhy\s+(?:do\s+I|am\s+I)\s+(?:need|required)\s+to\s+verify\b/i, /\bunable\s+to\s+verify\b/i],
-    recommendation: "Simplify verification with clear document requirements upfront, real-time validation feedback, and a progress tracker: Submitted \u2192 Under Review \u2192 Verified.",
+    recommendation: "Immediate: Show clear document requirements upfront (accepted ID types, photo quality guidelines) with real-time validation feedback ('image too blurry — retake'). Add specific failure reasons instead of generic errors. Medium-term: Build a verification progress tracker: Submitted \u2192 Under Review \u2192 Verified with estimated review time. Add fallback verification methods (phone, manual review) for edge cases.",
     severity: 2 },
 
   // ─── PERPAY+ ───
   { id: "pp-cancel-subscription", product: "Perpay+",
     theme: "Wants to Cancel Perpay+ Subscription",
-    summary: "Customers want to cancel their Perpay+ subscription but can't find how, or feel the process is unnecessarily difficult.",
-    whyItMatters: "Cancellation friction creates negative brand sentiment. Customers who feel trapped will leave negative reviews and discourage referrals even after they eventually cancel.",
-    rootCause: "No self-service cancellation option exists — customers must contact support. The subscription value proposition isn't reinforced at the point of cancellation intent.",
+    summary: "Customers want to cancel their Perpay+ subscription but can't find how to do it in the app, or feel the process is unnecessarily difficult. Many are frustrated that cancellation requires contacting support rather than a simple toggle. Some report being talked out of cancelling without their consent. Top sub-tags: Subscription Cancellation, Perpay+ Billing, Cancellation Request.",
+    whyItMatters: "Cancellation friction creates outsized negative brand sentiment — customers who feel trapped will leave negative reviews, file BBB complaints, and actively discourage referrals even after they eventually cancel. 'Dark pattern' accusations around cancellation difficulty create regulatory and reputational risk.",
+    rootCause: "No self-service cancellation option exists — customers must contact support, creating a mandatory retention conversation. The cancellation flow was designed for retention but frustrates customers who've already decided to leave. The subscription value proposition isn't reinforced proactively during the subscription period, only at the point of cancellation intent.",
     patterns: [/\bcancel\s+(?:my\s+)?(?:perpay\s*\+|perpay\s+plus|subscription|membership)\b/i, /\bunsubscribe\s+(?:from\s+)?(?:perpay\s*\+|perpay\s+plus)\b/i, /\bdon'?t\s+want\s+(?:perpay\s*\+|perpay\s+plus|the\s+subscription)\b/i, /\bstop\s+(?:my\s+)?(?:perpay\s*\+|perpay\s+plus|subscription)\s+(?:charge|payment|fee)\b/i, /\bhow\s+(?:do\s+I|can\s+I|to)\s+cancel\s+(?:perpay\s*\+|perpay\s+plus|my\s+subscription)\b/i],
-    recommendation: "Add one-click self-service cancellation with a retention screen showing personalized value (credit score improvement, savings). Offer pause option as alternative.",
+    recommendation: "Immediate: Add one-click self-service cancellation in the app with a confirmation screen (no mandatory retention call). Show personalized value summary at cancellation — credit score change since enrollment, total payments reported. Medium-term: Offer a 'pause subscription' option as an alternative to full cancellation. Add proactive monthly value recap emails showing credit bureau reporting activity.",
     severity: 4 },
   { id: "pp-credit-not-reporting", product: "Perpay+",
-    theme: "Credit Not Reporting to Bureaus",
-    summary: "Customers subscribed to Perpay+ for credit building but their payments aren't appearing on their credit reports. They question whether the service is working.",
-    whyItMatters: "Credit reporting is the core value proposition of Perpay+. When it doesn't show up, customers feel scammed and will cancel — this is the #1 retention risk for the product.",
-    rootCause: "Bureau reporting cycles are monthly with variable timing. No in-app status shows customers when their data was last reported or when the next report is due.",
+    theme: "Credit Not Reporting to Bureaus / Missing from Report",
+    summary: "Customers subscribed to Perpay+ specifically for credit building but their payments aren't appearing on credit reports from Experian, TransUnion, or Equifax. Some have been subscribed for months with no bureau activity. They question whether the service is legitimate. Top sub-tags: Credit Reporting, Bureau Inquiry, Credit Building.",
+    whyItMatters: "Credit reporting is the single core value proposition of Perpay+. When it doesn't show up, customers feel scammed and will cancel immediately \u2014 this is the #1 retention risk for the product. These conversations frequently include language like 'waste of money' and 'scam.'",
+    rootCause: "Bureau reporting cycles are monthly with variable timing per bureau. The first report may take 30-60 days after enrollment. No in-app status shows when data was last submitted, which bureaus received it, or when the next report is due. Customers have no way to verify the service is active.",
     patterns: [/\b(?:not|isn'?t|hasn'?t|didn'?t|never)\s+(?:been\s+)?(?:reported?|reporting|show(?:ing|n)?)\s+(?:on|to)\s+(?:my\s+)?(?:credit|bureau|experian|transunion|equifax)\b/i, /\bcredit\s+(?:report|score|bureau)\s+(?:not|isn'?t|hasn'?t|doesn'?t)\s+(?:show|reflect|update)\b/i, /\bwhen\s+(?:will|does)\s+(?:it|perpay)\s+(?:report|show)\s+(?:on|to)\s+(?:my\s+)?credit\b/i, /\bnot\s+(?:seeing|showing)\s+(?:on\s+)?(?:my\s+)?credit\s+report\b/i],
-    recommendation: "Add a reporting status tracker: Last Reported \u2192 Next Report Date \u2192 Bureau Confirmation. Send push notification when each report is submitted.",
+    recommendation: "Immediate: Add bureau reporting status dashboard showing per-bureau: Last Reported Date \u2192 Next Scheduled Report \u2192 Bureau Confirmation. Medium-term: Push notification when each bureau report is submitted. Add 'proof of reporting' downloadable statement for customers to verify independently.",
     severity: 4 },
   { id: "pp-credit-score-drop", product: "Perpay+",
     theme: "Credit Score Dropped or Not Improving",
-    summary: "Customers paying for Perpay+ see their credit score drop or not improve. They blame Perpay and question the value of the subscription.",
-    whyItMatters: "Score disappointment leads to cancellations and negative word-of-mouth. Customers who joined specifically for credit building feel betrayed if scores don't improve.",
-    rootCause: "Credit scores are affected by many factors beyond Perpay+ reporting. Customers lack education on what moves their score and have unrealistic timeline expectations.",
+    summary: "Customers paying for Perpay+ see their credit score drop or stagnate despite consistent payments. They blame Perpay directly and question whether the subscription is a 'scam.' Some report scores dropping immediately after Perpay+ started reporting. Top sub-tags: Credit Score, Score Drop, Credit Building.",
+    whyItMatters: "Score disappointment is the #1 cancellation trigger for Perpay+. Customers who joined specifically for credit building feel actively harmed — not just disappointed — when scores drop. This creates intense negative word-of-mouth and social media complaints that undermine the product's core marketing promise.",
+    rootCause: "Credit scores are affected by many factors beyond Perpay+ reporting (utilization changes, hard inquiries, other account activity). When Perpay+ opens a new tradeline, it can temporarily lower scores due to reduced average account age. Customers lack education on these dynamics and have unrealistic timeline expectations (expecting improvement in weeks, not months).",
     patterns: [/\bcredit\s+score\s+(?:went|dropped?|decreased?|fell|go(?:ne|ing)?\s+down|lower|hasn'?t\s+(?:gone\s+up|improved|changed|increased))\b/i, /\bscore\s+(?:went|dropped?|decreased?|fell)\b/i, /\bwhy\s+(?:did|has|is)\s+my\s+(?:credit\s+)?score\s+(?:drop|decrease|go\s+down|lower)\b/i, /\bperpay\s+(?:hurt|lower|drop|damage)(?:ed|ing|s)?\s+(?:my\s+)?(?:credit|score)\b/i],
-    recommendation: "Show a personalized credit factors breakdown. Educate on typical improvement timelines (3-6 months). Add a score trend chart tied to Perpay+ payment history.",
+    recommendation: "Immediate: Add a 'Credit Score Factors' explainer in the Perpay+ dashboard showing what affects scores (account age, utilization, payment history) and why a temporary dip is normal for new tradelines. Medium-term: Build a score trend chart tied to Perpay+ payment history with projected improvement timeline (3-6 month view). Send monthly 'credit health' summary showing Perpay+ contribution vs. other factors.",
     severity: 3 },
   { id: "pp-charged-after-cancel", product: "Perpay+",
     theme: "Still Charged After Cancellation",
-    summary: "Customers who cancelled Perpay+ are still seeing charges. They believe they were told it was cancelled but deductions continue.",
-    whyItMatters: "Post-cancellation charges are a trust emergency. These customers are likely to file chargebacks, leave 1-star reviews, and report to consumer protection agencies.",
-    rootCause: "Cancellation processing has a lag — requests submitted mid-billing cycle may not take effect until the next cycle. Confirmation messaging is ambiguous about effective dates.",
+    summary: "Customers who cancelled Perpay+ are still seeing charges on subsequent paychecks. They believe they were told it was cancelled but deductions continue for one or more additional cycles. Some report having to contact support multiple times to fully stop charges. Top sub-tags: Post-Cancellation Charge, Billing Dispute, Subscription Billing.",
+    whyItMatters: "Post-cancellation charges are a trust emergency and potential regulatory issue. These customers are the most likely to file chargebacks, leave 1-star reviews, report to BBB/CFPB, and actively warn others against Perpay. This is among the highest severity issues for brand damage.",
+    rootCause: "Cancellation processing has a lag — requests submitted mid-billing cycle may not take effect until the next cycle because payroll deduction files are submitted in advance. The confirmation message says 'cancelled' but doesn't specify the effective date or whether one more charge will process. No proactive refund is issued for charges after the cancellation request date.",
     patterns: [/\bstill\s+(?:being\s+)?charged?\s+(?:after|even\s+though)\s+(?:I\s+)?cancel/i, /\bcharged?\s+(?:for\s+)?(?:perpay\s*\+|subscription)\s+(?:after|even\s+though)\s+(?:I\s+)?cancel/i, /\bcancel(?:led|ed)?\s+(?:but|and)\s+(?:still|keep)\s+(?:being\s+)?charged?\b/i, /\bwhy\s+(?:am\s+I|was\s+I)\s+(?:still\s+)?(?:being\s+)?charged?\s+(?:for\s+)?(?:perpay\s*\+|the\s+subscription)\b/i],
-    recommendation: "Process cancellations immediately with a clear confirmation showing the exact last charge date. Auto-refund any charges after the cancellation effective date.",
+    recommendation: "Immediate: Process cancellations with a clear confirmation showing the exact last charge date and whether one more deduction is already queued. Auto-refund any charges processed after the cancellation request date. Medium-term: Build real-time payroll deduction cancellation (cancel the next queued deduction file, not just the subscription record). Add post-cancellation confirmation email with refund details if applicable.",
     severity: 4 },
 
   // ─── CARD ───
   { id: "card-declined", product: "Card",
-    theme: "Card Declined at Point of Sale",
-    summary: "Customers' Perpay cards are being declined at merchants. They have available balance but don't understand why the transaction failed.",
-    whyItMatters: "Public declines are embarrassing and create immediate negative product sentiment. Declined customers may stop using the card entirely.",
-    rootCause: "Decline reasons vary (merchant category restrictions, daily limits, fraud holds) but the decline notification shows a generic message. Some holds release slowly.",
+    theme: "Card Declined at Point of Sale / No Explanation",
+    summary: "Customers report their Perpay credit card being declined at merchants despite believing they have available balance. They receive no real-time explanation for the decline. Top sub-tags: Transaction Declined, Merchant Block, Fraud Hold. Many customers report this happening at gas stations, grocery stores, and online checkout.",
+    whyItMatters: "Public declines are the single most embarrassing product experience. Each decline erodes card usage permanently \u2014 declined customers shift spending to other cards and rarely return to full usage. This directly impacts interchange revenue.",
+    rootCause: "Multiple decline triggers (merchant category code restrictions, daily transaction limits, fraud scoring, pending hold amounts reducing available balance) all surface as the same generic 'declined' message. No real-time push notification explains the specific reason.",
     patterns: [/\bcard\s+(?:was\s+|got\s+|keeps?\s+(?:getting\s+)?)?declined\b/i, /\btransaction\s+(?:was\s+)?declined\b/i, /\bcard\s+(?:didn'?t|did\s+not|won'?t|wouldn'?t)\s+work\b/i, /\bwhy\s+(?:was|is|did)\s+my\s+(?:card|transaction)\s+declined\b/i, /\bdeclined\s+(?:at|when|while)\s+(?:the\s+)?(?:store|checkout|register|pump|gas)\b/i],
-    recommendation: "Send real-time push with specific decline reason (insufficient funds, merchant block, fraud hold). Add a transaction retry button and self-service fraud hold release.",
+    recommendation: "Immediate: Map processor decline codes to customer-facing push notifications with specific reason + resolution action. Medium-term: Add real-time available balance check at merchant terminals. Build self-service fraud hold release and merchant category whitelist in the app.",
     severity: 4 },
   { id: "card-interest-confusion", product: "Card",
     theme: "Confusion About Interest Charges or APR",
-    summary: "Customers don't understand their interest charges, didn't know interest would apply, or are surprised by the APR on their statements.",
-    whyItMatters: "Interest confusion erodes trust and creates regulatory risk. Customers who feel blindsided by interest charges are high churn and complaint risk.",
-    rootCause: "APR terms are disclosed at card opening but not reinforced at point of purchase or on statements. Interest calculations are not broken down in a customer-friendly way.",
+    summary: "Customers don't understand their interest charges, didn't realize interest would apply, or are surprised by the APR on their statements. Many report not knowing they'd be charged interest until they saw their first statement. Some believe Perpay Card is interest-free like marketplace purchases. Top sub-tags: Interest Charges, APR Confusion, Statement Surprise.",
+    whyItMatters: "Interest confusion erodes trust and creates significant regulatory risk (TILA/Reg Z compliance). Customers who feel blindsided by interest charges are among the highest churn and complaint risk — they perceive it as deceptive, not just confusing. This drives CFPB complaints and negative reviews.",
+    rootCause: "APR terms are disclosed at card opening in dense legal language but not reinforced at point of purchase, on the payment screen, or on statements in plain language. Interest calculations (daily periodic rate × average daily balance) are not broken down in a customer-friendly way. Customers who migrate from interest-free marketplace to the credit card expect the same pricing model.",
     patterns: [/\b\d+(?:\.\d+)?\s*%\s*APR\b/, /\bhigh\s+APR\b/i, /\binterest\s+charge(?:s|d)?\b/i, /\bwhy\s+(?:am\s+I|was\s+I)\s+(?:being\s+)?charged\s+(?:so\s+much\s+)?interest\b/i, /\bdidn'?t\s+(?:know|expect|realize)\s+(?:about\s+)?(?:the\s+)?interest\b/i, /\bhow\s+(?:is|does)\s+(?:the\s+)?interest\s+(?:work|calculated|charged)\b/i],
-    recommendation: "Show projected interest on the payment screen before charges accrue. Add an interest calculator tool and 'pay by this date to avoid interest' prompts.",
+    recommendation: "Immediate: Add a prominent 'pay by [date] to avoid interest' banner on the card dashboard and payment screen. Show interest projection before charges accrue ('if you carry this balance, you'll owe ~$X in interest'). Medium-term: Build an interactive interest calculator tool. Add plain-language interest breakdown on statements: 'Your $X interest charge = Y% APR on $Z average daily balance for N days.'",
     severity: 3 },
   { id: "card-limit-decrease", product: "Card",
-    theme: "Credit Limit Decreased Without Explanation",
-    summary: "Customers' credit limits were reduced without warning. They made on-time payments and don't understand why their limit was cut.",
-    whyItMatters: "Unexplained limit decreases feel punitive and break trust at a moment when customers believe they've been responsible. This is a top driver of card abandonment.",
-    rootCause: "Periodic risk model re-evaluation can trigger limit decreases, but no proactive notification or explanation is sent to the customer before or after the change.",
+    theme: "Credit Limit Decrease / No Follow-Through on CLI",
+    summary: "Customers report credit limits being reduced without warning, or they accepted a credit limit increase (CLI) offer, completed the required steps (e.g., increased direct deposit), and then heard nothing. The limit never updated. Top sub-tags: Credit Limit Increase, CLI Request, CLI Activation.",
+    whyItMatters: "CLI is a key engagement and retention lever \u2014 customers who've completed their side of the offer feel deceived when the limit doesn't update. This breaks trust at a moment of positive engagement and product investment. Unexplained decreases create immediate abandonment risk.",
+    rootCause: "CLI activation is asynchronous \u2014 triggered by first qualifying direct deposit after acceptance, but with no ETA shown to the user. Specialist callback SLA (72 hrs) is not consistently met for CLI inquiries. Periodic risk re-evaluation can also reduce limits with no proactive notification.",
     patterns: [/\bcredit\s+limit\s+(?:was\s+|got\s+|has\s+been\s+)?(?:decreased|reduced|lowered|cut|dropped)\b/i, /\bwhy\s+(?:did|was|is)\s+my\s+(?:credit\s+)?limit\s+(?:decreased|reduced|lowered|cut|drop)\b/i, /\blimit\s+(?:went|go(?:ne|ing)?)\s+down\b/i, /\blower(?:ed)?\s+(?:my\s+)?(?:credit\s+)?limit\b/i],
-    recommendation: "Notify customers before limit changes with specific reasons. Show a path to limit restoration: 'Make X on-time payments to restore your previous limit.'",
+    recommendation: "Immediate: In-app CLI progress tracker: Accepted \u2192 Awaiting qualifying deposit \u2192 Processing \u2192 Active. Automated push when CLI activates. Medium-term: Fix specialist callback queue reliability for CLI cases specifically. Add pre-decrease notification with 30-day grace period.",
     severity: 4 },
   { id: "card-payment-posting", product: "Card",
     theme: "Card Payment Not Posting or Reflecting",
-    summary: "Customers paid their card balance but it's not reflected. Available credit hasn't updated and they can't make new purchases.",
-    whyItMatters: "Payment posting delays block spending and create financial anxiety. Customers who pay and don't see results may stop paying or file disputes.",
-    rootCause: "ACH payments take 1-3 business days to settle. Available credit doesn't update until settlement completes, but no ETA is shown to the customer.",
+    summary: "Customers paid their card balance but it's not reflected in available credit. They can't make new purchases despite having paid, and have no visibility into when the payment will post. Some report payments taking 5+ days, well beyond the expected 1-3 business day window. Top sub-tags: Payment Posting, Available Credit, Payment Processing.",
+    whyItMatters: "Payment posting delays directly block card usage and interchange revenue. Customers who pay their balance and still can't use their card feel punished for responsible behavior. This is a key driver of card abandonment — customers shift spending to competitors where payments post faster.",
+    rootCause: "ACH payments take 1-3 business days to settle but available credit doesn't update until full settlement completes. No intermediate credit release exists (unlike most major card issuers who release partial credit upon payment receipt). Weekend/holiday payments compound the delay. No ETA or status tracking is shown.",
     patterns: [/\b(?:card\s+)?payment\s+(?:not|isn'?t|hasn'?t)\s+(?:been\s+)?(?:posting|posted|reflecting|reflected|showing|applied)\b/i, /\bpaid\s+(?:my\s+)?card\s+(?:but|and)\s+(?:it\s+)?(?:still|not)\b/i, /\bwhen\s+(?:will|does)\s+(?:my\s+)?(?:card\s+)?payment\s+(?:post|reflect|show|apply)\b/i, /\bmade\s+(?:a\s+)?(?:card\s+)?payment\s+(?:\d+\s+)?(?:days?\s+)?ago\s+(?:and\s+)?(?:still|not)\b/i],
-    recommendation: "Show payment status tracker: Received \u2192 Processing \u2192 Posted. Provide estimated posting date and release partial available credit upon payment receipt.",
+    recommendation: "Immediate: Show payment status tracker: Received \u2192 Processing \u2192 Posted with estimated posting date. Send push notification when payment posts and credit is available. Medium-term: Release partial available credit upon payment receipt (before full ACH settlement) to unblock card usage. Benchmark against major issuers' instant payment posting capabilities.",
     severity: 3 },
   { id: "card-fraud-unauthorized", product: "Card",
     theme: "Unauthorized or Fraudulent Card Charges",
-    summary: "Customers see charges they didn't make. They need to report fraud, freeze their card, and get their money back but the process is unclear.",
-    whyItMatters: "Fraud is a trust emergency. Slow resolution or unclear process leads to chargebacks, account closure, and permanent customer loss.",
-    rootCause: "No instant card freeze is available in-app. Dispute filing requires contacting support, and investigation timelines are not communicated upfront.",
+    summary: "Customers see charges they didn't make and need to report fraud, freeze their card, and get their money back. The process requires contacting support — no self-service options exist. Investigation timelines are unclear and customers feel exposed while waiting. Top sub-tags: Fraud Report, Unauthorized Charge, Card Security, Dispute.",
+    whyItMatters: "Fraud is the highest-urgency trust emergency. Every minute without a card freeze means more potential fraudulent charges. Slow resolution or unclear process leads to chargebacks, account closure, and permanent customer loss. Customers who experience fraud with poor support resolution will never use the card again and actively warn others.",
+    rootCause: "No instant card freeze/lock is available in-app — customers must call support during business hours to freeze a compromised card. Dispute filing requires a full support conversation with no self-service form. Investigation timelines (typically 30-60 days per Reg E) are not communicated upfront. Provisional credit issuance is inconsistent.",
     patterns: [/\bunauthorized\s+(?:charge|transaction|purchase|activity)\b/i, /\bfraudulent\s+(?:charge|transaction|activity)\b/i, /\bdidn'?t\s+(?:make|authorize|recognize)\s+(?:this|that|the)\s+(?:charge|transaction|purchase)\b/i, /\bcharge\s+(?:I\s+)?(?:didn'?t|don'?t|never)\s+(?:make|recognize|authorize)\b/i, /\bsomeone\s+(?:else\s+)?(?:used|stole|is\s+using)\s+my\s+card\b/i, /\bcard\s+(?:was\s+)?(?:stolen|compromised|hacked)\b/i],
-    recommendation: "Add instant card freeze in-app. One-tap dispute filing with provisional credit within 24 hours. Show investigation timeline: Filed \u2192 Under Review \u2192 Resolved.",
+    recommendation: "Immediate: Add instant card freeze/lock toggle in-app (available 24/7, no support contact needed). One-tap dispute filing form with automatic provisional credit within 24 hours per Reg E requirements. Medium-term: Show investigation timeline tracker: Filed \u2192 Under Review \u2192 Resolved with estimated completion date. Add real-time transaction alerts so customers catch fraud immediately. Auto-freeze card when multiple declined transactions from unknown merchants occur.",
     severity: 4 },
   { id: "card-available-credit-wrong", product: "Card",
     theme: "Available Credit or Balance Seems Wrong",
-    summary: "Customers believe their available credit or balance is incorrect. It doesn't match their expectations based on payments made and purchases.",
-    whyItMatters: "Balance confusion creates support volume and erodes product trust. Customers who can't trust their balance display won't trust the product.",
-    rootCause: "Available credit includes pending holds, processing payments, and recent purchases that aren't yet itemized. No breakdown is shown to explain the number.",
+    summary: "Customers believe their available credit or balance is incorrect. It doesn't match their expectations based on payments made and purchases. Some see available credit lower than expected after paying their balance, while others don't understand why pending holds reduce their available credit. Top sub-tags: Balance Discrepancy, Available Credit, Pending Holds.",
+    whyItMatters: "Balance confusion is a high-volume support driver and erodes fundamental product trust. Customers who can't trust the number displayed on their dashboard won't trust the product with spending decisions. This creates a perception of 'hidden charges' or errors that drives disputes and social media complaints.",
+    rootCause: "Available credit is calculated as: Credit Limit - Statement Balance - Pending Transactions - Processing Payments + Pending Payment Credits, but only the final number is displayed. Pending merchant holds (especially gas stations pre-authorizing $75+) reduce available credit temporarily without explanation. Payments in processing don't restore available credit until settled.",
     patterns: [/\bavailable\s+(?:credit|balance)\s+(?:is\s+)?(?:wrong|incorrect|doesn'?t\s+match|not\s+right|less\s+than|lower\s+than)\b/i, /\bbalance\s+(?:is\s+)?(?:wrong|incorrect|doesn'?t\s+(?:match|look\s+right)|not\s+(?:right|correct|accurate))\b/i, /\bwhy\s+(?:is|does)\s+my\s+(?:available\s+)?(?:credit|balance)\s+(?:show|say|look)\b/i],
-    recommendation: "Show a transparent balance breakdown: Statement Balance - Pending Transactions - Processing Payments = Available Credit. Update in real-time.",
+    recommendation: "Immediate: Show a transparent balance breakdown on the dashboard: Credit Limit - Statement Balance - Pending Holds - Processing Payments = Available Credit, with each line item tappable for details. Medium-term: Add real-time balance updates with push notifications when holds are placed and released. Show pending hold expiration dates (e.g., 'Gas station hold of $75 will release in 3 days').",
     severity: 3 },
   { id: "card-how-increase-limit", product: "Card",
     theme: "Requesting Credit Limit Increase",
-    summary: "Customers want a higher credit limit but don't know if they're eligible, how to request one, or what criteria are used.",
-    whyItMatters: "CLI requests signal engaged, growing customers. Failing to provide a clear path loses revenue and may push customers to competitors offering higher limits.",
-    rootCause: "No self-service CLI request flow exists. Eligibility criteria and review timelines are not communicated. Customers accepted a CLI offer but the increase hasn't taken effect.",
+    summary: "Customers want a higher credit limit but don't know if they're eligible, how to request one, or what criteria are used for evaluation. Some have been customers for months with perfect payment history and feel they should qualify automatically. Others accepted a CLI offer but the increase never took effect. Top sub-tags: Credit Limit Increase, CLI Request, CLI Eligibility.",
+    whyItMatters: "CLI requests signal engaged, growing customers — this is the highest-intent positive engagement signal in the card product. Failing to provide a clear path loses interchange revenue and pushes customers to competitors offering higher limits. Unresolved CLI requests are a leading indicator of card abandonment.",
+    rootCause: "No self-service CLI request flow exists in the app. Eligibility criteria (payment history, tenure, income, utilization) are not communicated anywhere. Review timelines are opaque — customers who request via support don't know when to expect a decision. CLI offers that require actions (like increasing direct deposit) don't clearly communicate the activation trigger or timeline.",
     patterns: [/\b(?:increase|raise|higher)\s+(?:my\s+)?(?:credit\s+)?limit\b/i, /\bhow\s+(?:do\s+I|can\s+I|to)\s+(?:get\s+)?(?:a\s+)?(?:higher|more)\s+(?:credit\s+)?(?:limit|line)\b/i, /\brequest(?:ing)?\s+(?:a\s+)?(?:credit\s+)?limit\s+increase\b/i, /\bwant\s+(?:a\s+)?(?:higher|more)\s+(?:credit\s+)?limit\b/i],
-    recommendation: "In-app CLI progress tracker: Eligible \u2192 Request Submitted \u2192 Under Review \u2192 Approved. Show what factors determine eligibility and estimated review time.",
+    recommendation: "Immediate: Add self-service CLI request button in the app with clear eligibility criteria displayed (minimum tenure, payment history, utilization). Show estimated review timeline upon submission. Medium-term: Build a CLI progress tracker: Eligible \u2192 Request Submitted \u2192 Under Review \u2192 Decision with push notification at each stage. Add proactive CLI offers to qualified customers with one-tap acceptance and instant activation.",
     severity: 2 },
 ];
 
@@ -251,7 +255,7 @@ function extractUserText(raw) {
           .replace(/\\"/g, '"')
           .replace(/\\\\/g, "\\")
           // Strip email subject lines, signatures, addresses
-          .replace(/^Subject:\s*[^\n.]*[\n.]?/i, "")
+          // Keep Subject lines — they provide context for email-based conversations
           .replace(/\b\d{1,5}\s+\w+\s+(?:Street|St|Avenue|Ave|Suite|Ste|Road|Rd)\b[^.]*\.?/gi, "")
           .replace(/\bUnsubscribe\b[^.]*$/i, "")
           .replace(/\s+/g, " ")
@@ -302,7 +306,7 @@ function analyzeConversations(rows, headerMap) {
     const sentences = userText
       .split(/(?<=[.!?])\s+|(?:\.\s)|(?:\?\s)|(?:!\s)/)
       .map(s => s.trim())
-      .filter(s => s.length > 10 && s.length < 220 && /[a-zA-Z]/.test(s) && !/^[A-Z][a-z]+:\s/.test(s) && isCustomerSentence(s));
+      .filter(s => s.length > 10 && s.length < 400 && /[a-zA-Z]/.test(s) && isCustomerSentence(s));
 
     // Detect which product the conversation is explicitly about
     const textLower = userText.toLowerCase();
@@ -355,9 +359,9 @@ function analyzeConversations(rows, headerMap) {
       .map(q => {
         let score = 0;
         const len = q.length;
-        if (len >= 30 && len <= 140) score += 5;
-        else if (len < 30) score += 1;
-        else score -= Math.floor((len - 140) / 30);
+        if (len >= 40 && len <= 300) score += 5;
+        else if (len < 40) score += 1;
+        else score -= Math.floor((len - 300) / 50);
         if (/\b(I|my|me|i'?m|i'?ve|i'?d)\b/i.test(q)) score += 3;
         if (/\?\s*$/.test(q)) score += 1;
         if (/['"][a-z_]+['"]\s*:/i.test(q)) score -= 10;
@@ -919,6 +923,9 @@ function DecagonInsights() {
   );
 }
 
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<DecagonInsights />);
-</script></body></html>
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(DecagonInsights));
+</script>
+</body>
+</html>
