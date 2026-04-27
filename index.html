@@ -18,11 +18,11 @@ const { useState, useCallback, useRef, useMemo } = React;
 // trigrams) and clustering conversations around them. Product is inferred
 // per-theme from the language used in matching conversations.
 
-const STOPWORDS = new Set("a an the and or but if then else of to in on at for with by from is are was were be been being have has had do does did doesn don doesnt didnt didn won wont wasn werent isnt arent havent hasnt hadnt cant couldnt shouldnt wouldnt i im ive id youre youve youll were theyre theyve youd hed shed wed theyd ill well theyll he she we they them him her his hers theirs you your yours mine my me our ours us its this that these those it as not no yes please thanks thank hi hello hey ok okay so can could would should may might just get got getting give giving received receive about there here when what where which who why how whose very too also still even much more less than into out off up down over under again only own same other some any all each few most ll ve re d s t m o been will am had has having need needs needed want wants wanted go going went come came say said tell told make made take took use used see saw try tried let lets like".split(/\s+/));
+const STOPWORDS = new Set("a an the and or but if then else of to in on at for with by from is are was were be been being have has had do does did doesn don doesnt didnt didn won wont wasn werent isnt arent havent hasnt hadnt cant couldnt shouldnt wouldnt i im ive id youre youve youll were theyre theyve youd hed shed wed theyd ill well theyll he she we they them him her his hers theirs you your yours mine my me our ours us its this that these those it as not no yes please thanks thank hi hello hey ok okay so can could would should may might just get got getting give giving received receive about there here when what where which who why how whose very too also still even much more less than into out off up down over under again only own same other some any all each few most ll ve re d s t m o been will am had has having need needs needed want wants wanted go going went come came say said tell told make made take took use used see saw try tried let lets like zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand file files uploaded image images attachment attachments http https www com org net".split(/\s+/));
 
 // Generic customer-service noise — common in nearly every conversation, low product signal
 const NOISE_TERMS = new Set([
-  "customer service","customer support","let know","need help","please help","thank you","thanks much","good morning","good afternoon","good evening","best regards","kind regards","my account","my order","ai agent","live agent","real person","real human","speak someone","talk someone","get back","follow up","sent email","send email","phone number","reference number","case number","reach back","reach out","look forward","appreciate help","need assistance","please assist","please advise","let me","you know"
+  "customer service","customer support","let know","need help","please help","thank you","thanks much","good morning","good afternoon","good evening","best regards","kind regards","my account","my order","ai agent","live agent","real person","real human","speak someone","talk someone","get back","follow up","sent email","send email","phone number","reference number","case number","reach back","reach out","look forward","appreciate help","need assistance","please assist","please advise","let me","you know","uploaded file","upload file","file uploaded","uploaded image","two zero","zero zero","one zero","zero one","zero two","zero three","zero four","zero five","zero six","zero seven","zero eight","zero nine","actual person","call back","call me","want talk","want speak","reach out","business days","business day","working days","perpay com","decagon file"
 ]);
 
 // Per-theme product attribution rules
@@ -95,6 +95,13 @@ function extractUserText(raw) {
 // Tokenize lower-cased customer text into content words (drops stopwords + numbers + short tokens)
 function tokenize(text) {
   return text.toLowerCase()
+    // Strip URLs, file paths, UUIDs, long hex strings, and email addresses before tokenizing
+    .replace(/https?:\/\/[^\s"')]+/gi, " ")
+    .replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi, " ")
+    .replace(/[a-f0-9]{24,}/gi, " ")
+    .replace(/\S+@\S+\.\S+/g, " ")
+    // Strip spelled-out phone numbers (sequences of number-words)
+    .replace(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine)(?:\s+(?:zero|one|two|three|four|five|six|seven|eight|nine)){2,}\b/gi, " ")
     .replace(/['']/g, "'")
     .replace(/[^a-z0-9'\s-]/g, " ")
     .split(/\s+/)
@@ -111,10 +118,14 @@ function ngramsOf(tokens, n) {
 function isMeaningfulPhrase(p) {
   if (NOISE_TERMS.has(p)) return false;
   const words = p.split(" ");
-  // Reject if every word is a generic high-frequency filler
-  const fillers = new Set(["account","customer","support","service","help","question","issue","problem","email","phone","number","message","know","want","need","like","please"]);
+  // Reject if every word is a generic high-frequency filler or metadata
+  const fillers = new Set(["account","customer","support","service","help","question","issue","problem","email","phone","number","message","know","want","need","like","please","file","files","uploaded","upload","image","images","attachment","call","agent","person","back","day","days","time","today","yesterday","week","month","year","still","already","really","actually"]);
   const meaningful = words.filter(w => !fillers.has(w));
-  return meaningful.length >= 1;
+  if (meaningful.length < 1) return false;
+  // Reject if phrase is just number words or metadata fragments
+  const numWords = new Set(["zero","one","two","three","four","five","six","seven","eight","nine","ten"]);
+  if (words.every(w => numWords.has(w))) return false;
+  return true;
 }
 
 // Decide which product an n-gram + its conversations belong to
@@ -203,7 +214,13 @@ function analyzeConversations(rows, headerMap) {
 
     // Quotes: sentences containing the phrase. Rank for first-person + length.
     const candidateSentences = new Set();
-    convList.forEach(c => c.sentences.forEach(s => { if (phraseRe.test(s)) candidateSentences.add(s); }));
+    convList.forEach(c => c.sentences.forEach(s => {
+      if (phraseRe.test(s)) {
+        // Clean quote: strip URLs, UUIDs, long hex, and email addresses
+        const cleaned = s.replace(/https?:\/\/[^\s"')]+/gi, "").replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi, "").replace(/[a-f0-9]{24,}/gi, "").replace(/\S+@\S+\.\S+/g, "").replace(/\s+/g, " ").trim();
+        if (cleaned.length > 15) candidateSentences.add(cleaned);
+      }
+    }));
     const rankedQuotes = [...candidateSentences].map(q => {
       let score = 0;
       const len = q.length;
