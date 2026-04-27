@@ -12,26 +12,135 @@ const { useState, useCallback, useRef, useMemo } = React;
 
 
 
-// ─── Theme discovery (dynamic) ───
-// Themes are NOT hardcoded. They are discovered from the actual customer text
-// in the uploaded CSV by extracting recurring noun/verb phrases (bigrams +
-// trigrams) and clustering conversations around them. Product is inferred
-// per-theme from the language used in matching conversations.
+// ─── Issue Catalog ───
+// Curated, specific themes grouped by product. Each theme has regex patterns
+// that match real customer language. Quotes are pulled from sentences that
+// match the same patterns — guaranteeing quote-to-theme accuracy.
 
-const STOPWORDS = new Set("a an the and or but if then else of to in on at for with by from is are was were be been being have has had do does did doesn don doesnt didnt didn won wont wasn werent isnt arent havent hasnt hadnt cant couldnt shouldnt wouldnt i im ive id youre youve youll were theyre theyve youd hed shed wed theyd ill well theyll he she we they them him her his hers theirs you your yours mine my me our ours us its this that these those it as not no yes please thanks thank hi hello hey ok okay so can could would should may might just get got getting give giving received receive about there here when what where which who why how whose very too also still even much more less than into out off up down over under again only own same other some any all each few most ll ve re d s t m o been will am had has having need needs needed want wants wanted go going went come came say said tell told make made take took use used see saw try tried let lets like zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand million file files uploaded image images attachment attachments http https www com org net perpay per pay franklin january february march april may june july august september october november december jan feb mar apr jun jul aug sep oct nov dec date birth".split(/\s+/));
+const ISSUE_CATALOG = [
+  // ─── MARKETPLACE ───
+  { id: "mp-order-denied", product: "Marketplace",
+    theme: "Order denied or not approved",
+    patterns: [/\border\s+(?:was\s+)?(?:denied|rejected|not\s+approved)\b/i, /\bwhy\s+(?:was|did|is)\s+my\s+order\s+(?:denied|rejected)\b/i, /\bcan'?t\s+(?:place|make|submit)\s+(?:an?\s+)?order\b/i, /\bapproval\s+(?:denied|rejected)\b/i, /\border\s+(?:didn'?t|did\s+not)\s+go\s+through\b/i],
+    recommendation: "Surface clear denial reasons at checkout. Show customers what factors led to the decision and what steps they can take to improve approval odds.",
+    severity: 4 },
+  { id: "mp-item-damaged-wrong", product: "Marketplace",
+    theme: "Item arrived damaged, wrong, or defective",
+    patterns: [/\bitem\s+(?:is\s+|was\s+|arrived?\s+|came\s+)?(?:damaged|broken|defective|wrong)\b/i, /\breceived?\s+(?:the\s+)?wrong\s+(?:item|product|size|color)\b/i, /\bwrong\s+(?:item|product|size|color)\s+(?:was\s+)?(?:sent|delivered|received)\b/i, /\b(?:item|product)\s+(?:is\s+)?(?:not\s+what\s+I\s+ordered|different\s+from)\b/i, /\b(?:damaged|broken)\s+(?:when|on)\s+(?:arrival|delivery)\b/i],
+    recommendation: "Streamline the damaged/wrong item resolution flow with photo upload and one-click replacement or refund.",
+    severity: 3 },
+  { id: "mp-return-refund", product: "Marketplace",
+    theme: "Difficulty with returns or refunds",
+    patterns: [/\bhow\s+(?:do\s+I|can\s+I|to)\s+(?:return|get\s+a?\s*refund)\b/i, /\breturn\s+(?:my|this|the)\s+(?:item|order|product)\b/i, /\bwant\s+(?:a\s+|my\s+)?refund\b/i, /\brefund\s+(?:hasn'?t|has\s+not|didn'?t|not)\s+(?:been\s+)?(?:processed|received|posted|issued)\b/i, /\bwhere'?s?\s+my\s+refund\b/i, /\bstill\s+(?:waiting|no)\s+(?:for\s+)?(?:my\s+)?refund\b/i],
+    recommendation: "Reduce refund processing time and provide real-time refund status tracking in the customer dashboard.",
+    severity: 3 },
+  { id: "mp-shipping-delay", product: "Marketplace",
+    theme: "Shipping delays or tracking issues",
+    patterns: [/\border\s+(?:hasn'?t|has\s+not)\s+(?:arrived|shipped|been\s+(?:delivered|shipped))\b/i, /\bwhere'?s?\s+my\s+(?:order|package|item|shipment)\b/i, /\btracking\s+(?:not\s+)?(?:updating|working|showing|available)\b/i, /\b(?:still|been)\s+(?:waiting|pending)\s+(?:for\s+)?(?:my\s+)?(?:order|delivery|shipment)\b/i, /\bshipping\s+(?:is\s+)?(?:taking|took)\s+(?:too\s+)?long\b/i],
+    recommendation: "Improve shipping visibility with proactive delay notifications and real-time tracking updates in the app.",
+    severity: 2 },
+  { id: "mp-cancel-order", product: "Marketplace",
+    theme: "Unable to cancel or modify order",
+    patterns: [/\bcancel\s+(?:my|this|the)\s+order\b/i, /\bwant\s+to\s+cancel\b/i, /\bcan'?t\s+cancel\b/i, /\bhow\s+(?:do\s+I|can\s+I|to)\s+cancel\s+(?:my|an?)\s+order\b/i, /\bchange\s+(?:my|the)\s+order\b/i, /\bmodify\s+(?:my|the)\s+order\b/i],
+    recommendation: "Allow order cancellation and modification within a grace window post-purchase and make the option easily accessible.",
+    severity: 2 },
+  { id: "mp-spending-limit-low", product: "Marketplace",
+    theme: "Spending limit too low or decreased",
+    patterns: [/\bspending\s+limit\s+(?:is\s+)?(?:too\s+)?(?:low|small|not\s+enough)\b/i, /\bwhy\s+(?:did|is|was)\s+my\s+(?:spending\s+)?limit\s+(?:so\s+)?(?:low|decrease|drop|go\s+down|reduced)\b/i, /\blimit\s+(?:was\s+|got\s+|has\s+been\s+)?(?:decreased|reduced|lowered|cut)\b/i, /\bincrease\s+(?:my\s+)?(?:spending\s+)?limit\b/i, /\bhow\s+(?:do\s+I|can\s+I|to)\s+(?:get\s+|raise\s+)?(?:a\s+)?(?:higher\s+)?(?:spending\s+)?limit\b/i],
+    recommendation: "Introduce a transparent limit-increase flow. Show what behaviors (on-time payments, tenure) trigger increases and when the next review happens.",
+    severity: 4 },
+  { id: "mp-pricing-overcharge", product: "Marketplace",
+    theme: "Perceived overpricing or unexpected charges on orders",
+    patterns: [/\bprice\s+(?:is\s+)?(?:too\s+)?(?:high|expensive|much)\b/i, /\bovercharged?\b/i, /\bcharged\s+(?:more|extra|twice|double)\b/i, /\bwhy\s+(?:am\s+I|was\s+I)\s+charged\s+(?:so\s+much|more|extra)\b/i, /\bhidden\s+(?:fees?|charges?|costs?)\b/i],
+    recommendation: "Break down pricing transparently at checkout. Show base price, fees, and any interest or markup clearly before purchase.",
+    severity: 3 },
 
-// Generic customer-service noise — common in nearly every conversation, low product signal
-const NOISE_TERMS = new Set([
-  "customer service","customer support","let know","need help","please help","thank you","thanks much","good morning","good afternoon","good evening","best regards","kind regards","my account","my order","ai agent","live agent","real person","real human","speak someone","talk someone","get back","follow up","sent email","send email","phone number","reference number","case number","reach back","reach out","look forward","appreciate help","need assistance","please assist","please advise","let me","you know","uploaded file","upload file","file uploaded","uploaded image","two zero","zero zero","one zero","zero one","zero two","zero three","zero four","zero five","zero six","zero seven","zero eight","zero nine","actual person","call back","call me","want talk","want speak","reach out","business days","business day","working days","perpay com","decagon file","per pay","perpay","nineteen ninety","date birth","social security","last four","first last","first name","last name","mailing address","billing address","linked account","checking account","savings account"
-]);
+  // ─── CORE ───
+  { id: "core-direct-deposit-issue", product: "Core",
+    theme: "Direct deposit not showing or delayed",
+    patterns: [/\bdirect\s+deposit\s+(?:hasn'?t|has\s+not|didn'?t|not)\s+(?:been\s+)?(?:posted|deposited|showing|arrived|hit|come|appeared)\b/i, /\bwhere'?s?\s+my\s+(?:direct\s+)?deposit\b/i, /\bdirect\s+deposit\s+(?:is\s+)?(?:late|delayed|missing|pending)\b/i, /\bwhen\s+(?:will|does)\s+(?:my\s+)?direct\s+deposit\s+(?:post|arrive|hit|show)\b/i, /\bmy\s+(?:direct\s+)?deposit\s+(?:is\s+)?not\s+(?:on|in|showing)\b/i, /\bmy\s+(?:paycheck|pay)\s+(?:hasn'?t|didn'?t|not)\s+(?:been\s+)?(?:deposited|posted)\b/i],
+    recommendation: "Provide proactive deposit status updates and estimated arrival times. Surface payroll processing schedules so customers know when to expect funds.",
+    severity: 4 },
+  { id: "core-payment-issue", product: "Core",
+    theme: "Payment not processing or posting correctly",
+    patterns: [/\bpayment\s+(?:didn'?t|did\s+not|hasn'?t|not)\s+(?:go\s+through|process|post|work)\b/i, /\bpayment\s+(?:is\s+)?(?:stuck|pending|failed|declined)\b/i, /\bmade\s+a\s+payment\s+(?:but|and)\s+(?:it\s+)?(?:still|not)\b/i, /\bwhy\s+(?:hasn'?t|didn'?t)\s+my\s+payment\s+(?:posted|processed|gone\s+through)\b/i, /\bdouble\s+(?:charged|payment|deducted)\b/i],
+    recommendation: "Improve real-time payment status visibility. Show processing timelines and send confirmation once payments post.",
+    severity: 3 },
+  { id: "core-account-locked", product: "Core",
+    theme: "Account locked, frozen, or access issues",
+    patterns: [/\baccount\s+(?:is\s+|was\s+|got\s+|has\s+been\s+)?(?:locked|frozen|suspended|disabled|closed|restricted)\b/i, /\bcan'?t\s+(?:access|log\s*in|sign\s*in|get\s+into)\s+(?:my\s+)?account\b/i, /\blocked\s+out\s+(?:of\s+)?(?:my\s+)?account\b/i, /\bwhy\s+(?:is|was)\s+my\s+account\s+(?:locked|frozen|closed|suspended)\b/i, /\bunlock\s+(?:my\s+)?account\b/i],
+    recommendation: "Clarify account lock reasons with specific in-app messaging and provide a self-service unlock flow where security allows.",
+    severity: 4 },
+  { id: "core-autopay-issue", product: "Core",
+    theme: "Autopay not working or unexpected deductions",
+    patterns: [/\bautopay\s+(?:isn'?t|is\s+not|not)\s+(?:working|processing|deducting)\b/i, /\bturn\s+off\s+autopay\b/i, /\bcancel\s+autopay\b/i, /\bstop\s+(?:auto|automatic)\s*(?:pay|payment|deduction)\b/i, /\bautopay\s+(?:took|deducted|charged)\s+(?:too\s+much|more|wrong|extra|twice)\b/i, /\bset\s+up\s+autopay\b/i, /\b(?:auto|automatic)\s*(?:pay|payment)\s+(?:didn'?t|did\s+not)\b/i],
+    recommendation: "Give customers clear autopay controls with real-time confirmation of changes and upcoming deduction previews.",
+    severity: 3 },
+  { id: "core-verification", product: "Core",
+    theme: "Identity or account verification difficulties",
+    patterns: [/\bverif(?:y|ication)\s+(?:my\s+)?(?:identity|account|income|employment)\b/i, /\bcan'?t\s+(?:verify|complete\s+verification)\b/i, /\bverification\s+(?:failed|not\s+working|keeps?\s+failing|stuck)\b/i, /\bwhy\s+(?:do\s+I|am\s+I)\s+(?:need|required)\s+to\s+verify\b/i, /\bunable\s+to\s+verify\b/i],
+    recommendation: "Simplify the verification flow with clearer document requirements and real-time status updates on verification progress.",
+    severity: 2 },
 
-// Per-theme product attribution rules
-const PRODUCT_KEYWORDS = {
-  "Card": ["credit card","perpay card","apr","interest charge","interest rate","statement balance","minimum payment","card declined","card was declined","credit limit","spending limit","card payment","card transaction","swipe","merchant","charged interest","late fee","cardholder","cash advance"],
-  "Marketplace": ["marketplace","place order","placed order","item","shipping","tracking","delivery","delivered","checkout","cart","return","refund","vendor","warehouse","shipped","arrived","damaged","wrong item","missing item","order approval","order denied","order canceled","order cancelled","price","discount","product"],
-  "Perpay+": ["perpay+","perpay plus","subscription","membership","credit building","credit score","credit report","credit bureau","monthly fee","cancel subscription","unsubscribe","reporting","experian","transunion","equifax"],
-  "Core": ["login","log in","password","reset password","autopay","direct deposit","paycheck","payroll","deduction","employer","verification","verify identity","two factor","update email","change phone","update address","payment method","bank account","ach"]
-};
+  // ─── PERPAY+ ───
+  { id: "pp-cancel-subscription", product: "Perpay+",
+    theme: "Wants to cancel Perpay+ subscription",
+    patterns: [/\bcancel\s+(?:my\s+)?(?:perpay\s*\+|perpay\s+plus|subscription|membership)\b/i, /\bunsubscribe\s+(?:from\s+)?(?:perpay\s*\+|perpay\s+plus)\b/i, /\bdon'?t\s+want\s+(?:perpay\s*\+|perpay\s+plus|the\s+subscription)\b/i, /\bstop\s+(?:my\s+)?(?:perpay\s*\+|perpay\s+plus|subscription)\s+(?:charge|payment|fee)\b/i, /\bhow\s+(?:do\s+I|can\s+I|to)\s+cancel\s+(?:perpay\s*\+|perpay\s+plus|my\s+subscription)\b/i],
+    recommendation: "Make cancellation self-service and transparent. Offer a retention flow that explains benefits before confirming cancellation.",
+    severity: 4 },
+  { id: "pp-credit-not-reporting", product: "Perpay+",
+    theme: "Credit reporting not showing on credit report",
+    patterns: [/\b(?:not|isn'?t|hasn'?t|didn'?t|never)\s+(?:been\s+)?(?:reported?|reporting|show(?:ing|n)?)\s+(?:on|to)\s+(?:my\s+)?(?:credit|bureau|experian|transunion|equifax)\b/i, /\bcredit\s+(?:report|score|bureau)\s+(?:not|isn'?t|hasn'?t|doesn'?t)\s+(?:show|reflect|update)\b/i, /\bwhen\s+(?:will|does)\s+(?:it|perpay)\s+(?:report|show)\s+(?:on|to)\s+(?:my\s+)?credit\b/i, /\bnot\s+(?:seeing|showing)\s+(?:on\s+)?(?:my\s+)?credit\s+report\b/i],
+    recommendation: "Set clear expectations about reporting timelines. Add a reporting status tracker in the Perpay+ dashboard so customers can see when their next report is due.",
+    severity: 4 },
+  { id: "pp-credit-score-drop", product: "Perpay+",
+    theme: "Credit score dropped or not improving",
+    patterns: [/\bcredit\s+score\s+(?:went|dropped?|decreased?|fell|go(?:ne|ing)?\s+down|lower|hasn'?t\s+(?:gone\s+up|improved|changed|increased))\b/i, /\bscore\s+(?:went|dropped?|decreased?|fell)\b/i, /\bwhy\s+(?:did|has|is)\s+my\s+(?:credit\s+)?score\s+(?:drop|decrease|go\s+down|lower)\b/i, /\bperpay\s+(?:hurt|lower|drop|damage)(?:ed|ing|s)?\s+(?:my\s+)?(?:credit|score)\b/i],
+    recommendation: "Educate customers about factors that affect credit scores. Show a personalized credit score trend with explanations for changes.",
+    severity: 3 },
+  { id: "pp-charged-after-cancel", product: "Perpay+",
+    theme: "Still being charged after cancellation request",
+    patterns: [/\bstill\s+(?:being\s+)?charged?\s+(?:after|even\s+though)\s+(?:I\s+)?cancel/i, /\bcharged?\s+(?:for\s+)?(?:perpay\s*\+|subscription)\s+(?:after|even\s+though)\s+(?:I\s+)?cancel/i, /\bcancel(?:led|ed)?\s+(?:but|and)\s+(?:still|keep)\s+(?:being\s+)?charged?\b/i, /\bwhy\s+(?:am\s+I|was\s+I)\s+(?:still\s+)?(?:being\s+)?charged?\s+(?:for\s+)?(?:perpay\s*\+|the\s+subscription)\b/i],
+    recommendation: "Ensure cancellations are processed immediately with confirmation. Add a post-cancellation receipt showing no future charges.",
+    severity: 4 },
+
+  // ─── CARD ───
+  { id: "card-declined", product: "Card",
+    theme: "Card declined at point of sale",
+    patterns: [/\bcard\s+(?:was\s+|got\s+|keeps?\s+(?:getting\s+)?)?declined\b/i, /\btransaction\s+(?:was\s+)?declined\b/i, /\bcard\s+(?:didn'?t|did\s+not|won'?t|wouldn'?t)\s+work\b/i, /\bwhy\s+(?:was|is|did)\s+my\s+(?:card|transaction)\s+declined\b/i, /\bdeclined\s+(?:at|when|while)\s+(?:the\s+)?(?:store|checkout|register|pump|gas)\b/i],
+    recommendation: "Surface specific decline reasons (insufficient funds, merchant category, fraud hold) in real-time push notifications so customers aren't left guessing.",
+    severity: 4 },
+  { id: "card-interest-confusion", product: "Card",
+    theme: "Confusion about interest charges or APR",
+    patterns: [/\b\d+(?:\.\d+)?\s*%\s*APR\b/, /\bhigh\s+APR\b/i, /\binterest\s+charge(?:s|d)?\b/i, /\bwhy\s+(?:am\s+I|was\s+I)\s+(?:being\s+)?charged\s+(?:so\s+much\s+)?interest\b/i, /\bdidn'?t\s+(?:know|expect|realize)\s+(?:about\s+)?(?:the\s+)?interest\b/i, /\bhow\s+(?:is|does)\s+(?:the\s+)?interest\s+(?:work|calculated|charged)\b/i],
+    recommendation: "Make APR and interest calculations transparent. Show projected interest on the payment screen before charges accrue.",
+    severity: 3 },
+  { id: "card-limit-decrease", product: "Card",
+    theme: "Credit limit decreased without explanation",
+    patterns: [/\bcredit\s+limit\s+(?:was\s+|got\s+|has\s+been\s+)?(?:decreased|reduced|lowered|cut|dropped)\b/i, /\bwhy\s+(?:did|was|is)\s+my\s+(?:credit\s+)?limit\s+(?:decreased|reduced|lowered|cut|drop)\b/i, /\blimit\s+(?:went|go(?:ne|ing)?)\s+down\b/i, /\blower(?:ed)?\s+(?:my\s+)?(?:credit\s+)?limit\b/i],
+    recommendation: "Notify customers proactively before limit changes with clear reasons and steps to restore or increase their limit.",
+    severity: 4 },
+  { id: "card-payment-posting", product: "Card",
+    theme: "Card payment not posting or reflecting",
+    patterns: [/\b(?:card\s+)?payment\s+(?:not|isn'?t|hasn'?t)\s+(?:been\s+)?(?:posting|posted|reflecting|reflected|showing|applied)\b/i, /\bpaid\s+(?:my\s+)?card\s+(?:but|and)\s+(?:it\s+)?(?:still|not)\b/i, /\bwhen\s+(?:will|does)\s+(?:my\s+)?(?:card\s+)?payment\s+(?:post|reflect|show|apply)\b/i, /\bmade\s+(?:a\s+)?(?:card\s+)?payment\s+(?:\d+\s+)?(?:days?\s+)?ago\s+(?:and\s+)?(?:still|not)\b/i],
+    recommendation: "Provide real-time payment posting status and expected processing timelines on the card payment screen.",
+    severity: 3 },
+  { id: "card-fraud-unauthorized", product: "Card",
+    theme: "Unauthorized or fraudulent charges on card",
+    patterns: [/\bunauthorized\s+(?:charge|transaction|purchase|activity)\b/i, /\bfraudulent\s+(?:charge|transaction|activity)\b/i, /\bdidn'?t\s+(?:make|authorize|recognize)\s+(?:this|that|the)\s+(?:charge|transaction|purchase)\b/i, /\bcharge\s+(?:I\s+)?(?:didn'?t|don'?t|never)\s+(?:make|recognize|authorize)\b/i, /\bsomeone\s+(?:else\s+)?(?:used|stole|is\s+using)\s+my\s+card\b/i, /\bcard\s+(?:was\s+)?(?:stolen|compromised|hacked)\b/i],
+    recommendation: "Implement instant card freeze and one-tap dispute filing. Provide faster fraud investigation turnaround with status updates.",
+    severity: 4 },
+  { id: "card-available-credit-wrong", product: "Card",
+    theme: "Available credit or balance seems incorrect",
+    patterns: [/\bavailable\s+(?:credit|balance)\s+(?:is\s+)?(?:wrong|incorrect|doesn'?t\s+match|not\s+right|less\s+than|lower\s+than)\b/i, /\bbalance\s+(?:is\s+)?(?:wrong|incorrect|doesn'?t\s+(?:match|look\s+right)|not\s+(?:right|correct|accurate))\b/i, /\bwhy\s+(?:is|does)\s+my\s+(?:available\s+)?(?:credit|balance)\s+(?:show|say|look)\b/i],
+    recommendation: "Show a transparent balance breakdown (pending transactions, recent payments, holds) so customers can see exactly how available credit is calculated.",
+    severity: 3 },
+  { id: "card-how-increase-limit", product: "Card",
+    theme: "Requesting credit limit increase",
+    patterns: [/\b(?:increase|raise|higher)\s+(?:my\s+)?(?:credit\s+)?limit\b/i, /\bhow\s+(?:do\s+I|can\s+I|to)\s+(?:get\s+)?(?:a\s+)?(?:higher|more)\s+(?:credit\s+)?(?:limit|line)\b/i, /\brequest(?:ing)?\s+(?:a\s+)?(?:credit\s+)?limit\s+increase\b/i, /\bwant\s+(?:a\s+)?(?:higher|more)\s+(?:credit\s+)?limit\b/i],
+    recommendation: "Build a self-service limit increase request flow. Show customers what factors determine their limit and what they can do to qualify for more.",
+    severity: 2 },
+];
 
 const PRODUCT_ORDER = ["Marketplace", "Core", "Perpay+", "Card"];
 
@@ -92,49 +201,9 @@ function extractUserText(raw) {
 }
 
 // ─── Analysis Engine ───
-// Tokenize lower-cased customer text into content words (drops stopwords + numbers + short tokens)
-function tokenize(text) {
-  return text.toLowerCase()
-    // Strip URLs, file paths, UUIDs, long hex strings, and email addresses before tokenizing
-    .replace(/https?:\/\/[^\s"')]+/gi, " ")
-    .replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi, " ")
-    .replace(/[a-f0-9]{24,}/gi, " ")
-    .replace(/\S+@\S+\.\S+/g, " ")
-    // Strip spelled-out phone numbers (sequences of number-words)
-    .replace(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine)(?:\s+(?:zero|one|two|three|four|five|six|seven|eight|nine)){2,}\b/gi, " ")
-    .replace(/['']/g, "'")
-    .replace(/[^a-z0-9'\s-]/g, " ")
-    .split(/\s+/)
-    .filter(w => w && w.length >= 3 && !STOPWORDS.has(w) && !/^\d+$/.test(w));
-}
-
-function ngramsOf(tokens, n) {
-  const out = [];
-  for (let i = 0; i <= tokens.length - n; i++) out.push(tokens.slice(i, i + n).join(" "));
-  return out;
-}
-
-// Heuristic: is this n-gram a meaningful topic phrase? (not pure boilerplate)
-function isMeaningfulPhrase(p) {
-  if (NOISE_TERMS.has(p)) return false;
-  const words = p.split(" ");
-  // Reject if every word is a generic high-frequency filler or metadata
-  const fillers = new Set(["account","customer","support","service","help","question","issue","problem","email","phone","number","message","know","want","need","like","please","file","files","uploaded","upload","image","images","attachment","call","agent","person","back","day","days","time","today","yesterday","week","month","year","still","already","really","actually","perpay","pay","per","franklin","assistant","address","name","information","provide","provided","verify","verified","check","checked","update","updated","confirm","confirmed","able","unable","sure","right","thing","something","anything","nothing","going","looking","look","think","thought","work","working","contact","contacted"]);
-  const meaningful = words.filter(w => !fillers.has(w));
-  if (meaningful.length < 1) return false;
-  // Reject if phrase is just number words or date words
-  const numWords = new Set(["zero","one","two","three","four","five","six","seven","eight","nine","ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen","eighteen","nineteen","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety","hundred","thousand","first","second","third","fourth","fifth"]);
-  if (words.every(w => numWords.has(w))) return false;
-  // Reject if phrase contains the company name as the only meaningful word
-  const withoutBrand = words.filter(w => w !== "perpay" && w !== "per" && w !== "pay" && w !== "franklin");
-  const withoutBrandAndFillers = withoutBrand.filter(w => !fillers.has(w));
-  if (withoutBrandAndFillers.length < 1) return false;
-  return true;
-}
 
 // Filter out AI agent sentences from quotes
 function isCustomerSentence(s) {
-  // Reject sentences that are clearly from the AI agent, not the customer
   if (/\b(?:I'?m|I am)\s+(?:Franklin|the AI|an AI|a virtual|your virtual|your AI|here to help|happy to help|glad to help)/i.test(s)) return false;
   if (/\bAI assistant\b/i.test(s)) return false;
   if (/\b(?:I'?d recommend|I recommend|I suggest|I can help|I can assist|Let me help|Let me look|Let me check|I understand your|I apologize|I'?m sorry to hear)/i.test(s)) return false;
@@ -142,132 +211,84 @@ function isCustomerSentence(s) {
   return true;
 }
 
-// Decide which product an n-gram + its conversations belong to
-function inferProduct(ngram, convTexts) {
-  const haystack = (ngram + " " + convTexts.join(" ")).toLowerCase();
-  const score = { Marketplace: 0, Card: 0, "Perpay+": 0, Core: 0 };
-  for (const [product, kws] of Object.entries(PRODUCT_KEYWORDS)) {
-    for (const kw of kws) {
-      const re = new RegExp("\\b" + kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "gi");
-      const matches = haystack.match(re);
-      if (matches) score[product] += matches.length * (ngram.toLowerCase().includes(kw) ? 3 : 1);
-    }
-  }
-  let best = "Core", bestScore = 0;
-  for (const [p, s] of Object.entries(score)) if (s > bestScore) { best = p; bestScore = s; }
-  return best;
-}
-
-function titleCase(s) { return s.replace(/\b\w/g, c => c.toUpperCase()); }
-
 function analyzeConversations(rows, headerMap) {
   const msgField = headerMap.message;
   const idField = headerMap.id;
   const dateField = headerMap.date;
+
   if (!msgField) return { error: "Could not find a message/conversation column. Please ensure your CSV has a column named 'message', 'conversation', 'text', 'content', 'body', or 'transcript'." };
 
-  // ── Pass 1: extract per-conversation user text, sentences, and n-gram set ──
-  const convs = [];
+  const themeMap = {};
+  let totalRelevant = 0;
+
   rows.forEach((row, idx) => {
     const raw = row[msgField] || "";
     const userText = extractUserText(raw);
-    if (!userText || userText.length < 20) return;
+    if (!userText || userText.length < 15) return;
+
     const id = idField ? row[idField] : `conv-${idx + 1}`;
     const date = dateField ? row[dateField] : null;
+
+    // Split into clean sentences for quote extraction — filter out AI agent text
     const sentences = userText
       .split(/(?<=[.!?])\s+|(?:\.\s)|(?:\?\s)|(?:!\s)/)
       .map(s => s.trim())
-      .filter(s => s.length > 12 && s.length < 240 && /[a-zA-Z]/.test(s) && !/^[A-Z][a-z]+:\s/.test(s) && isCustomerSentence(s));
-    const tokens = tokenize(userText);
-    const phraseSet = new Set([...ngramsOf(tokens, 2), ...ngramsOf(tokens, 3)].filter(isMeaningfulPhrase));
-    convs.push({ id, date, userText, sentences, phraseSet });
+      .filter(s => s.length > 10 && s.length < 220 && /[a-zA-Z]/.test(s) && !/^[A-Z][a-z]+:\s/.test(s) && isCustomerSentence(s));
+
+    // Test each issue in the catalog
+    let matched = false;
+    for (const issue of ISSUE_CATALOG) {
+      const isMatch = issue.patterns.some(p => p.test(userText));
+      if (!isMatch) continue;
+      matched = true;
+
+      // Quotes: sentences from THIS conversation that match THIS issue's patterns
+      const matchingQuotes = sentences.filter(s => issue.patterns.some(p => p.test(s)));
+
+      if (!themeMap[issue.id]) {
+        themeMap[issue.id] = { ...issue, conversations: [], quotes: new Set() };
+      }
+      themeMap[issue.id].conversations.push({ id, date, text: userText, excerpt: userText.slice(0, 280) });
+      matchingQuotes.forEach(q => {
+        // Clean quote: strip URLs, UUIDs, and email addresses
+        const cleaned = q.replace(/https?:\/\/[^\s"')]+/gi, "").replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi, "").replace(/[a-f0-9]{24,}/gi, "").replace(/\S+@\S+\.\S+/g, "").replace(/\s+/g, " ").trim();
+        if (cleaned.length > 15) themeMap[issue.id].quotes.add(cleaned);
+      });
+    }
+    if (matched) totalRelevant++;
   });
 
-  if (convs.length === 0) return { error: "No customer text could be extracted from this CSV." };
+  // Convert sets to arrays, rank quotes, compute frequency
+  const themes = Object.values(themeMap).map(t => {
+    const count = t.conversations.length;
+    const frequency = count >= 8 ? "High" : count >= 3 ? "Medium" : "Low";
 
-  // ── Pass 2: document frequency for every candidate phrase ──
-  const df = new Map(); // phrase -> Set of conv indexes
-  convs.forEach((c, i) => c.phraseSet.forEach(p => {
-    if (!df.has(p)) df.set(p, new Set());
-    df.get(p).add(i);
-  }));
+    const rankedQuotes = Array.from(t.quotes)
+      .filter(isCustomerSentence)
+      .map(q => {
+        let score = 0;
+        const len = q.length;
+        if (len >= 30 && len <= 140) score += 5;
+        else if (len < 30) score += 1;
+        else score -= Math.floor((len - 140) / 30);
+        if (/\b(I|my|me|i'?m|i'?ve|i'?d)\b/i.test(q)) score += 3;
+        if (/\?\s*$/.test(q)) score += 1;
+        if (/['"][a-z_]+['"]\s*:/i.test(q)) score -= 10;
+        if (/external_id|created_at|conversation_id|\bid':/i.test(q)) score -= 10;
+        if (/^Subject:/i.test(q)) score -= 5;
+        return { q, score };
+      })
+      .filter(x => x.score > -5)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .map(x => x.q);
 
-  // Keep phrases that appear in >=3 conversations and <=60% of corpus (not ubiquitous)
-  const minDF = Math.max(3, Math.ceil(convs.length * 0.02));
-  const maxDF = Math.max(minDF + 1, Math.floor(convs.length * 0.6));
-  const candidates = [...df.entries()]
-    .filter(([_, s]) => s.size >= minDF && s.size <= maxDF)
-    .sort((a, b) => b[1].size - a[1].size);
-
-  // ── Pass 3: greedy dedupe — drop phrases whose conv set is mostly a subset of an already-picked theme ──
-  const picked = []; // { phrase, convs: Set, words: Set }
-  for (const [phrase, convSet] of candidates) {
-    const words = new Set(phrase.split(" "));
-    let isDup = false;
-    for (const p of picked) {
-      // word overlap (longer phrase containing same key noun)
-      const wordOverlap = [...words].filter(w => p.words.has(w)).length;
-      if (wordOverlap >= Math.min(words.size, p.words.size)) { isDup = true; break; }
-      // conversation overlap > 70% of the smaller set
-      const inter = [...convSet].filter(c => p.convs.has(c)).length;
-      const smaller = Math.min(convSet.size, p.convs.size);
-      if (smaller > 0 && inter / smaller > 0.7) { isDup = true; break; }
-    }
-    if (!isDup) picked.push({ phrase, convs: convSet, words });
-    if (picked.length >= 25) break;
-  }
-
-  // ── Pass 4: build themes ──
-  const totalRelevant = new Set();
-  const themes = picked.map(({ phrase, convs: convSet }) => {
-    const convList = [...convSet].map(i => convs[i]);
-    convList.forEach(c => totalRelevant.add(c.id));
-    const product = inferProduct(phrase, convList.map(c => c.userText));
-    const phraseWords = phrase.split(" ");
-    const phraseRe = new RegExp("\\b" + phraseWords.join("\\W+") + "\\b", "i");
-
-    // Quotes: sentences containing the phrase. Rank for first-person + length.
-    const candidateSentences = new Set();
-    convList.forEach(c => c.sentences.forEach(s => {
-      if (phraseRe.test(s)) {
-        // Clean quote: strip URLs, UUIDs, long hex, and email addresses
-        const cleaned = s.replace(/https?:\/\/[^\s"')]+/gi, "").replace(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi, "").replace(/[a-f0-9]{24,}/gi, "").replace(/\S+@\S+\.\S+/g, "").replace(/\s+/g, " ").trim();
-        if (cleaned.length > 15) candidateSentences.add(cleaned);
-      }
-    }));
-    const rankedQuotes = [...candidateSentences].filter(isCustomerSentence).map(q => {
-      let score = 0;
-      const len = q.length;
-      if (len >= 30 && len <= 160) score += 5;
-      else if (len < 30) score += 1;
-      else score -= Math.floor((len - 160) / 30);
-      if (/\b(I|my|me|i'?m|i'?ve|i'?d)\b/i.test(q)) score += 4;
-      if (/\?\s*$/.test(q)) score += 1;
-      if (/['"][a-z_]+['"]\s*:/i.test(q)) score -= 10;
-      if (/external_id|created_at|conversation_id|\bid':/i.test(q)) score -= 10;
-      if (/^Subject:/i.test(q)) score -= 5;
-      return { q, score };
-    }).filter(x => x.score > -3).sort((a, b) => b.score - a.score).slice(0, 3).map(x => x.q);
-
-    const count = convSet.size;
-    const frequency = count >= 10 ? "High" : count >= 4 ? "Medium" : "Low";
-    const themeName = titleCase(phrase);
-    const recommendation = `Customers raised concerns about "${phrase}" in ${count} conversation${count === 1 ? "" : "s"}. Investigate root cause within ${product}, surface clearer in-product messaging, and consider a flow improvement that proactively addresses this scenario.`;
-
-    return {
-      id: phrase.replace(/\s+/g, "-"),
-      product, theme: themeName,
-      patternPhrase: phrase,
-      conversations: convList.map(c => ({ id: c.id, date: c.date, excerpt: c.userText.slice(0, 280) })),
-      quotes: rankedQuotes,
-      recommendation,
-      count, frequency,
-      severity: count >= 10 ? 4 : count >= 6 ? 3 : count >= 3 ? 2 : 1
-    };
-  }).filter(t => t.quotes.length > 0); // drop themes with no clean quote evidence
+    return { ...t, quotes: rankedQuotes, count, frequency };
+  });
 
   const freqScore = { High: 3, Medium: 2, Low: 1 };
   themes.sort((a, b) => (b.severity * freqScore[b.frequency] * b.count) - (a.severity * freqScore[a.frequency] * a.count));
+
   const top5 = themes.slice(0, 5);
 
   const byProduct = {};
@@ -276,8 +297,8 @@ function analyzeConversations(rows, headerMap) {
 
   return {
     total: rows.length,
-    relevant: totalRelevant.size,
-    filtered: rows.length - totalRelevant.size,
+    relevant: totalRelevant,
+    filtered: rows.length - totalRelevant,
     themes, byProduct, top5,
     analysisDate: new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })
   };
