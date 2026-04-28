@@ -932,16 +932,17 @@ function DecagonInsights() {
   const [tab, setTab] = useState("upload");
   const [analysis, setAnalysis] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [archives, setArchives] = useState(() => {
+  const [archives, setArchives] = useState(function() {
     try {
-      const saved = localStorage.getItem("decagon-archives");
+      var saved = localStorage.getItem("decagon-archives");
       return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
+    } catch (e) { return []; }
   });
   const [currentWeekLabel, setCurrentWeekLabel] = useState("");
   const [currentFileName, setCurrentFileName] = useState("");
 
-  useEffect(() => {
+  // Persist archives to localStorage whenever they change
+  useEffect(function() {
     try {
       localStorage.setItem("decagon-archives", JSON.stringify(archives));
     } catch (e) { console.warn("Could not save to localStorage:", e); }
@@ -960,12 +961,35 @@ function DecagonInsights() {
     }, 600);
   }, []);
 
-  const handleSaveToArchive = useCallback(() => {
+  const handleSaveToArchive = useCallback(function() {
     if (!analysis) return;
-    setArchives(prev => [{
-      weekLabel: currentWeekLabel, fileName: currentFileName, analysis: { ...analysis },
+    // Strip non-serializable data (RegExp patterns) and trim conversation text
+    // so JSON.stringify works reliably and localStorage doesn't overflow
+    var cleanThemes = analysis.themes.map(function(t) {
+      return {
+        id: t.id, product: t.product, theme: t.theme, summary: t.summary,
+        whyItMatters: t.whyItMatters, rootCause: t.rootCause,
+        recommendation: t.recommendation, severity: t.severity,
+        quotes: t.quotes || [], count: t.count, frequency: t.frequency,
+        conversations: (t.conversations || []).map(function(c) {
+          return { id: c.id, date: c.date, excerpt: c.excerpt };
+        })
+      };
+    });
+    var cleanByProduct = {};
+    PRODUCT_ORDER.forEach(function(p) {
+      cleanByProduct[p] = cleanThemes.filter(function(t) { return t.product === p; });
+    });
+    var cleanTop5 = cleanThemes.slice(0, 5);
+    var cleanAnalysis = {
+      total: analysis.total, relevant: analysis.relevant, filtered: analysis.filtered,
+      analysisDate: analysis.analysisDate, themes: cleanThemes,
+      byProduct: cleanByProduct, top5: cleanTop5
+    };
+    setArchives(function(prev) { return [{
+      weekLabel: currentWeekLabel, fileName: currentFileName, analysis: cleanAnalysis,
       savedDate: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })
-    }, ...prev]);
+    }].concat(prev); });
   }, [analysis, currentWeekLabel, currentFileName]);
 
   const handleDeleteArchive = useCallback((idx) => {
