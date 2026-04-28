@@ -12,7 +12,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useCallback, useRef, useMemo } = React;
+const { useState, useCallback, useRef, useMemo, useEffect } = React;
 
 
 
@@ -359,17 +359,42 @@ function analyzeConversations(rows, headerMap) {
       .map(q => {
         let score = 0;
         const len = q.length;
-        if (len >= 40 && len <= 300) score += 5;
-        else if (len < 40) score += 1;
+        // Ideal length: 50-250 chars
+        if (len >= 50 && len <= 250) score += 6;
+        else if (len >= 30 && len <= 300) score += 3;
+        else if (len < 30) score -= 2;
         else score -= Math.floor((len - 300) / 50);
+
+        // Strong first-person experience statements
         if (/\b(I|my|me|i'?m|i'?ve|i'?d)\b/i.test(q)) score += 3;
-        if (/\?\s*$/.test(q)) score += 1;
+
+        // Frustration / emotional signals — these make the best quotes for PMs
+        if (/\b(frustrated|frustrating|ridiculous|unacceptable|terrible|horrible|awful|disgusting|pathetic|joke|scam|rip\s*off|waste|useless|pointless|makes?\s+no\s+sense)\b/i.test(q)) score += 8;
+        if (/\b(angry|furious|upset|disappointed|annoyed|fed\s+up|sick\s+of|tired\s+of|done\s+with|over\s+it|had\s+enough|last\s+straw)\b/i.test(q)) score += 6;
+        if (/\b(can'?t\s+believe|don'?t\s+understand|no\s+one\s+(?:can|will)|been\s+trying|keeps?\s+happening|every\s+time|again\s+and\s+again|multiple\s+times|called?\s+(?:\d+|several|multiple)\s+times)\b/i.test(q)) score += 5;
+
+        // Retention risk signals
+        if (/\b(cancel|closing?\s+(?:my|the)\s+account|switch|leave|go\s+(?:to|with)\s+(?:another|different)|never\s+(?:again|using)|done\s+with|leaving)\b/i.test(q)) score += 7;
+
+        // Specific product impact statements
+        if (/\b(charged|deducted|took\s+(?:my|the)|lost|missing|won'?t\s+(?:let|allow)|denied|declined|rejected|blocked|frozen|locked)\b/i.test(q)) score += 4;
+
+        // Financial harm signals
+        if (/\b(overdraft|overdrew|bounced?|nsf|late\s+fee|can'?t\s+pay|rent|bills?|groceries|gas|behind\s+on)\b/i.test(q)) score += 6;
+
+        // Questions show confusion/pain points
+        if (/\?\s*$/.test(q)) score += 2;
+
+        // Penalize metadata/noise
         if (/['"][a-z_]+['"]\s*:/i.test(q)) score -= 10;
         if (/external_id|created_at|conversation_id|\bid':/i.test(q)) score -= 10;
-        if (/^Subject:/i.test(q)) score -= 5;
+        if (/^Subject:/i.test(q)) score -= 3;
+        // Penalize generic/short questions
+        if (/^(how|what|when|where|why|can|do|does|is|are)\s/i.test(q) && len < 40) score -= 3;
+
         return { q, score };
       })
-      .filter(x => x.score > -5)
+      .filter(x => x.score > -3)
       .sort((a, b) => b.score - a.score)
       .slice(0, 3)
       .map(x => x.q);
@@ -673,8 +698,10 @@ function InsightsTab({ analysis, onSaveToArchive }) {
 }
 
 // ─── Archive Tab ───
-function ArchiveTab({ archives, onDelete }) {
+function ArchiveTab({ archives, onDelete, onClearAll }) {
   const [expandedIdx, setExpandedIdx] = useState(null);
+  const [selectedWeekTab, setSelectedWeekTab] = useState({});
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const downloadReport = (archive) => {
     const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -794,11 +821,73 @@ function ArchiveTab({ archives, onDelete }) {
     );
   }
 
+  // Get the currently selected week tab for a given archive index (defaults to "top5")
+  const getWeekTab = (idx) => selectedWeekTab[idx] || "top5";
+
+  const renderArchiveInsights = (archive, idx) => {
+    const currentTab = getWeekTab(idx);
+    const analysis = archive.analysis;
+    const tabOptions = [
+      { id: "top5", label: "Top 5 Critical" },
+      ...PRODUCT_ORDER.filter(p => (analysis.byProduct[p] || []).length > 0).map(p => ({ id: p, label: p }))
+    ];
+
+    return (
+      <div style={{ padding: "16px 20px", borderTop: "1px solid #F3F4F6" }}>
+        {/* Week tab row */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 16, flexWrap: "wrap" }}>
+          {tabOptions.map(t => (
+            <button key={t.id} onClick={(e) => { e.stopPropagation(); setSelectedWeekTab(prev => ({ ...prev, [idx]: t.id })); }}
+              style={{ padding: "5px 14px", borderRadius: 16, border: currentTab === t.id ? "none" : "1px solid #D1D5DB",
+                background: currentTab === t.id ? (productColors[t.id]?.badge || "#DC2626") : "#fff",
+                color: currentTab === t.id ? "#fff" : "#374151", fontSize: 12, fontWeight: currentTab === t.id ? 600 : 400, cursor: "pointer" }}>
+              {t.label}
+              {t.id === "top5" ? ` (${analysis.top5.length})` : ` (${(analysis.byProduct[t.id] || []).length})`}
+            </button>
+          ))}
+        </div>
+
+        {/* Content based on selected tab */}
+        {currentTab === "top5" && (
+          <div style={{ background: "#FEF2F2", borderRadius: 12, padding: "18px 22px", border: "1px solid #FECACA" }}>
+            <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 800, color: "#991B1B" }}>{"\uD83D\uDEA8"} Top 5 Most Critical Insights</h3>
+            {analysis.top5.map((theme, i) => <ThemeCard key={theme.id} theme={theme} rank={i + 1} totalConvs={analysis.total} />)}
+          </div>
+        )}
+        {currentTab !== "top5" && (
+          <ProductSection product={currentTab} themes={analysis.byProduct[currentTab] || []} totalConvs={analysis.total} />
+        )}
+      </div>
+    );
+  };
+
   return (
     <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 20px" }}>
-      <div style={{ marginBottom: 24 }}>
-        <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Insights Archive</h2>
-        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>{archives.length} saved report{archives.length !== 1 ? "s" : ""} for week-over-week review</p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Insights Archive</h2>
+          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>{archives.length} saved report{archives.length !== 1 ? "s" : ""} for week-over-week review</p>
+        </div>
+        <div>
+          {!confirmClear ? (
+            <button onClick={() => setConfirmClear(true)}
+              style={{ background: "#FEF2F2", color: "#DC2626", border: "1px solid #FECACA", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              Clear All Data
+            </button>
+          ) : (
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: "#DC2626", fontWeight: 600 }}>Are you sure?</span>
+              <button onClick={() => { onClearAll(); setConfirmClear(false); }}
+                style={{ background: "#EF4444", color: "#fff", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                Yes, clear all
+              </button>
+              <button onClick={() => setConfirmClear(false)}
+                style={{ background: "#fff", color: "#374151", border: "1px solid #D1D5DB", borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {archives.length >= 2 && (
@@ -831,18 +920,7 @@ function ArchiveTab({ archives, onDelete }) {
               <button onClick={(e) => { e.stopPropagation(); onDelete(idx); }} style={{ background: "#EF4444", color: "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Delete</button>
             </div>
           </div>
-          {expandedIdx === idx && (
-            <div style={{ padding: "0 20px 16px", borderTop: "1px solid #F3F4F6" }}>
-              <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700, color: "#991B1B", marginBottom: 6 }}>Top 5 Critical</div>
-              {archive.analysis.top5.map((t, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 0", borderBottom: "1px solid #F3F4F6", fontSize: 12 }}>
-                  <Badge label={`#${i + 1}`} color="#fff" bg="#DC2626" />
-                  <Badge label={t.product} color="#fff" bg={productColors[t.product].badge} />
-                  <span style={{ color: "#374151" }}>{t.theme}</span>
-                </div>
-              ))}
-            </div>
-          )}
+          {expandedIdx === idx && renderArchiveInsights(archive, idx)}
         </div>
       ))}
     </div>
@@ -854,9 +932,20 @@ function DecagonInsights() {
   const [tab, setTab] = useState("upload");
   const [analysis, setAnalysis] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [archives, setArchives] = useState([]);
+  const [archives, setArchives] = useState(() => {
+    try {
+      const saved = localStorage.getItem("decagon-archives");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [currentWeekLabel, setCurrentWeekLabel] = useState("");
   const [currentFileName, setCurrentFileName] = useState("");
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("decagon-archives", JSON.stringify(archives));
+    } catch (e) { console.warn("Could not save to localStorage:", e); }
+  }, [archives]);
 
   const handleAnalyze = useCallback((data, headerMap, weekLabel, fileName) => {
     setIsAnalyzing(true);
@@ -881,6 +970,11 @@ function DecagonInsights() {
 
   const handleDeleteArchive = useCallback((idx) => {
     setArchives(prev => prev.filter((_, i) => i !== idx));
+  }, []);
+
+  const handleClearAll = useCallback(() => {
+    setArchives([]);
+    try { localStorage.removeItem("decagon-archives"); } catch (e) { /* ignore */ }
   }, []);
 
   const tabs = [
@@ -917,7 +1011,7 @@ function DecagonInsights() {
       <div style={{ maxWidth: 960, margin: "0 auto" }}>
         {tab === "upload" && <UploadTab onAnalyze={handleAnalyze} isAnalyzing={isAnalyzing} />}
         {tab === "insights" && <InsightsTab analysis={analysis} onSaveToArchive={handleSaveToArchive} />}
-        {tab === "archive" && <ArchiveTab archives={archives} onDelete={handleDeleteArchive} />}
+        {tab === "archive" && <ArchiveTab archives={archives} onDelete={handleDeleteArchive} onClearAll={handleClearAll} />}
       </div>
     </div>
   );
