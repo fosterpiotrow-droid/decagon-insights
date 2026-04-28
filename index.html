@@ -393,44 +393,62 @@ function analyzeConversations(rows, headerMap) {
       .map(q => {
         let score = 0;
         const len = q.length;
-        // Ideal length: 50-250 chars
-        if (len >= 50 && len <= 250) score += 6;
-        else if (len >= 30 && len <= 300) score += 3;
-        else if (len < 30) score -= 2;
-        else score -= Math.floor((len - 300) / 50);
 
-        // Strong first-person experience statements
-        if (/\b(I|my|me|i'?m|i'?ve|i'?d)\b/i.test(q)) score += 3;
+        // ── HARD REJECT: transaction details, order info, product descriptions ──
+        // Quotes like "I want to cancel my #P011993419 Repayment • $187.85 • Apr 13"
+        if (/[#P]\d{5,}/i.test(q)) score -= 20; // Order/repayment IDs
+        if (/\$\d+\.\d{2}/.test(q)) score -= 10; // Dollar amounts
+        if (/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},?\s*\d{0,4}/i.test(q)) score -= 5; // Dates
+        if (/\b(?:Repayment|Payment)\s*[\u2022\u00b7•·\-]\s*\$/i.test(q)) score -= 20; // "Repayment • $XX" pattern
+        if (/\b\d+P\s+(?:Full\s+)?HD\b/i.test(q)) score -= 20; // Product specs like "1080P Full HD"
+        if (/\b(?:Minolta|Samsung|Apple|Sony|LG|Nike|Adidas|Dyson)\b/i.test(q)) score -= 10; // Brand/product names
+        if (/^\s*I\s+want\s+to\s+cancel\s+my\s+#/i.test(q)) score -= 15; // "I want to cancel my #ORDER"
 
-        // Frustration / emotional signals — these make the best quotes for PMs
-        if (/\b(frustrated|frustrating|ridiculous|unacceptable|terrible|horrible|awful|disgusting|pathetic|joke|scam|rip\s*off|waste|useless|pointless|makes?\s+no\s+sense)\b/i.test(q)) score += 8;
-        if (/\b(angry|furious|upset|disappointed|annoyed|fed\s+up|sick\s+of|tired\s+of|done\s+with|over\s+it|had\s+enough|last\s+straw)\b/i.test(q)) score += 6;
-        if (/\b(can'?t\s+believe|don'?t\s+understand|no\s+one\s+(?:can|will)|been\s+trying|keeps?\s+happening|every\s+time|again\s+and\s+again|multiple\s+times|called?\s+(?:\d+|several|multiple)\s+times)\b/i.test(q)) score += 5;
+        // ── IDEAL LENGTH: 40-200 chars ──
+        if (len >= 40 && len <= 200) score += 6;
+        else if (len >= 25 && len <= 280) score += 3;
+        else if (len < 25) score -= 4;
+        else score -= Math.floor((len - 280) / 40);
 
-        // Retention risk signals
-        if (/\b(cancel|closing?\s+(?:my|the)\s+account|switch|leave|go\s+(?:to|with)\s+(?:another|different)|never\s+(?:again|using)|done\s+with|leaving)\b/i.test(q)) score += 7;
+        // ── MUST HAVE: first-person experience ──
+        if (/\b(I|my|me|I'?m|I'?ve|I'?d|I'?ll)\b/.test(q)) score += 4;
 
-        // Specific product impact statements
-        if (/\b(charged|deducted|took\s+(?:my|the)|lost|missing|won'?t\s+(?:let|allow)|denied|declined|rejected|blocked|frozen|locked)\b/i.test(q)) score += 4;
+        // ── HIGH VALUE: frustration with Perpay's PROCESS ──
+        // These are the quotes PMs actually act on
+        if (/\b(frustrated|frustrating|ridiculous|unacceptable|terrible|horrible|awful|pathetic|joke|scam|rip\s*off|waste\s+of|useless|pointless|makes?\s+no\s+sense|doesn'?t\s+make\s+sense)\b/i.test(q)) score += 10;
+        if (/\b(angry|furious|upset|disappointed|annoyed|disgusted|fed\s+up|sick\s+of|tired\s+of|done\s+with|over\s+it|had\s+enough|last\s+straw|worst\s+experience)\b/i.test(q)) score += 8;
 
-        // Financial harm signals
-        if (/\b(overdraft|overdrew|bounced?|nsf|late\s+fee|can'?t\s+pay|rent|bills?|groceries|gas|behind\s+on)\b/i.test(q)) score += 6;
+        // ── HIGH VALUE: describing broken process / repeated failures ──
+        if (/\b(can'?t\s+believe|don'?t\s+understand|no\s+one\s+(?:can|will|helps?)|been\s+trying|keeps?\s+happening|every\s+time|again\s+and\s+again|multiple\s+times|called?\s+(?:\d+|several|multiple)\s+times|still\s+(?:not|no|haven'?t|waiting)|nobody\s+(?:can|will|helps?))\b/i.test(q)) score += 7;
+        if (/\b(no\s+(?:explanation|reason|answer|response|update|help)|without\s+(?:explanation|reason|warning|notice)|never\s+(?:told|informed|notified|explained))\b/i.test(q)) score += 7;
 
-        // Questions show confusion/pain points
-        if (/\?\s*$/.test(q)) score += 2;
+        // ── HIGH VALUE: retention risk ──
+        if (/\b(cancel(?:ling)?\s+(?:my|the|this)|clos(?:e|ing)\s+(?:my|the)\s+account|switch(?:ing)?\s+to|leav(?:e|ing)\s+perpay|never\s+(?:again|using|ordering)|done\s+with\s+(?:perpay|this)|going\s+(?:to|with)\s+(?:another|different))\b/i.test(q)) score += 9;
+        if (/\b(report(?:ing)?\s+(?:to|with)\s+(?:BBB|CFPB|attorney\s+general|better\s+business)|file?\s+(?:a\s+)?complaint|legal\s+action|lawyer|sue)\b/i.test(q)) score += 10;
 
-        // Penalize metadata/noise/system text
-        if (/['"][a-z_]+['"]\s*:/i.test(q)) score -= 15;
-        if (/external_id|created_at|conversation_id|\bid':|event_type/i.test(q)) score -= 15;
-        if (/^Subject:/i.test(q)) score -= 5;
-        if (/\b(?:click here|visit|log in to|go to|navigate to)\s+(?:https?|www\.)/i.test(q)) score -= 5;
-        // Penalize generic/short questions and pleasantries
-        if (/^(how|what|when|where|why|can|do|does|is|are)\s/i.test(q) && len < 40) score -= 4;
-        if (/^(?:hi|hello|hey|thanks|thank you|ok|okay|yes|no)\b/i.test(q) && len < 30) score -= 8;
+        // ── MEDIUM VALUE: specific product/process complaints ──
+        if (/\b(won'?t\s+(?:let|allow)\s+me|denied\s+(?:with\s+)?no\s+(?:reason|explanation)|declined\s+(?:for|with)\s+no|blocked\s+(?:from|without)|locked\s+(?:out|me\s+out)|frozen\s+(?:my|the))\b/i.test(q)) score += 6;
+        if (/\b(still\s+(?:being\s+)?charged?|charged?\s+(?:after|even\s+(?:though|after))|double\s+charged?|overcharged?|wrong\s+amount|not\s+(?:showing|reporting|reflecting|updating|posting|working))\b/i.test(q)) score += 6;
+
+        // ── MEDIUM VALUE: financial harm ──
+        if (/\b(overdraft|overdrew|bounced?|nsf|late\s+fee|can'?t\s+pay\s+(?:my\s+)?(?:rent|bills?|mortgage)|behind\s+on|need\s+(?:my|that|the)\s+money|paycheck\s+to\s+paycheck)\b/i.test(q)) score += 8;
+
+        // ── LOW VALUE: generic questions (only good if long + substantive) ──
+        if (/\?\s*$/.test(q) && len >= 50) score += 2;
+
+        // ── PENALIZE: metadata, noise, non-substantive ──
+        if (/['"][a-z_]+['"]\s*:/i.test(q)) score -= 20;
+        if (/external_id|created_at|conversation_id|\bid':|event_type/i.test(q)) score -= 20;
+        if (/^Subject:/i.test(q)) score -= 8;
+        if (/\b(?:click here|visit|log in to|go to|navigate to)\s+(?:https?|www\.)/i.test(q)) score -= 8;
+        if (/^(how|what|when|where|why|can|do|does|is|are)\s/i.test(q) && len < 50) score -= 5;
+        if (/^(?:hi|hello|hey|thanks|thank you|ok|okay|yes|no|sure|got it|alright)\b/i.test(q) && len < 35) score -= 15;
+        // Just stating what they want to do without a complaint
+        if (/^I\s+(?:want|need|would\s+like)\s+to\s+(?:cancel|return|refund|pay|check|see|know|find|get)\b/i.test(q) && len < 60 && !/\b(but|because|since|however|still|yet|already|keep|can'?t)\b/i.test(q)) score -= 6;
 
         return { q, score };
       })
-      .filter(x => x.score > -3)
+      .filter(x => x.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, 3)
       .map(x => x.q);
