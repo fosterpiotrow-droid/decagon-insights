@@ -698,7 +698,7 @@ function InsightsTab({ analysis, onSaveToArchive }) {
 }
 
 // ─── Archive Tab ───
-function ArchiveTab({ archives, onDelete, onClearAll }) {
+function ArchiveTab({ archives, onDelete, onClearAll, onExportSite }) {
   const [expandedIdx, setExpandedIdx] = useState(null);
   const [selectedWeekTab, setSelectedWeekTab] = useState({});
   const [confirmClear, setConfirmClear] = useState(false);
@@ -868,7 +868,11 @@ function ArchiveTab({ archives, onDelete, onClearAll }) {
           <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Insights Archive</h2>
           <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>{archives.length} saved report{archives.length !== 1 ? "s" : ""} for week-over-week review</p>
         </div>
-        <div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={onExportSite}
+            style={{ background: "#6366F1", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+            {"\u2B07\uFE0F"} Export Site for Sharing
+          </button>
           {!confirmClear ? (
             <button onClick={() => setConfirmClear(true)}
               style={{ background: "#FEF2F2", color: "#DC2626", border: "1px solid #FECACA", borderRadius: 8, padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
@@ -934,6 +938,11 @@ function DecagonInsights() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [archives, setArchives] = useState(function() {
     try {
+      // First check for embedded data (baked into the HTML for sharing)
+      if (window.__DECAGON_EMBEDDED_ARCHIVES__ && window.__DECAGON_EMBEDDED_ARCHIVES__.length > 0) {
+        return window.__DECAGON_EMBEDDED_ARCHIVES__;
+      }
+      // Then check localStorage for local persistence
       var saved = localStorage.getItem("decagon-archives");
       return saved ? JSON.parse(saved) : [];
     } catch (e) { return []; }
@@ -1001,6 +1010,24 @@ function DecagonInsights() {
     try { localStorage.removeItem("decagon-archives"); } catch (e) { /* ignore */ }
   }, []);
 
+  const handleExportSite = useCallback(function() {
+    // Generate a new index.html with archive data baked in
+    // This grabs the current page's HTML and injects the archives as a global variable
+    var currentDoc = document.documentElement.outerHTML;
+    // Find the opening script tag for our app and inject data before it
+    var embedScript = '<script>window.__DECAGON_EMBEDDED_ARCHIVES__ = ' + JSON.stringify(archives) + ';<\/script>';
+    var injected = currentDoc.replace('<div id="root"></div>', '<div id="root"></div>\n' + embedScript);
+    var fullHTML = '<!DOCTYPE html>\n<html' + injected.slice(injected.indexOf('<html') + 5);
+
+    var blob = new Blob([fullHTML], { type: "text/html" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "index.html";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [archives]);
+
   const tabs = [
     { id: "upload", label: "Upload", icon: "\uD83D\uDCC1" },
     { id: "insights", label: "Insights", icon: "\uD83D\uDCCA", badge: analysis ? analysis.themes.length : null },
@@ -1035,7 +1062,7 @@ function DecagonInsights() {
       <div style={{ maxWidth: 960, margin: "0 auto" }}>
         {tab === "upload" && <UploadTab onAnalyze={handleAnalyze} isAnalyzing={isAnalyzing} />}
         {tab === "insights" && <InsightsTab analysis={analysis} onSaveToArchive={handleSaveToArchive} />}
-        {tab === "archive" && <ArchiveTab archives={archives} onDelete={handleDeleteArchive} onClearAll={handleClearAll} />}
+        {tab === "archive" && <ArchiveTab archives={archives} onDelete={handleDeleteArchive} onClearAll={handleClearAll} onExportSite={handleExportSite} />}
       </div>
     </div>
   );
