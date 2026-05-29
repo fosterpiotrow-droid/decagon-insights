@@ -223,8 +223,14 @@ const productColors = {
 // ─── PII Stripper ───
 function stripPII(text) {
   let t = text;
-  // Unicode BOM and other zero-width characters
+  // Unicode BOM, zero-width, and invisible characters — strip first so downstream regexes see clean text
   t = t.replace(/[﻿​‌‍­]/g, '');
+  // Emoji — strip early so name-at-end detection isn't blocked by trailing emoji
+  t = t.replace(/[\u{1F000}-\u{1FFFF}]/gu, '');
+  t = t.replace(/[\u{2600}-\u{27BF}]/gu, '');
+  t = t.replace(/[\u{1F300}-\u{1F9FF}]/gu, '');
+  t = t.replace(/[\u{1F600}-\u{1F64F}]/gu, '');
+  t = t.replace(/[❤♥✔✓★☆♡♥]/gu, ''); // hearts/stars/checks
   // Email thread subject prefixes: "Re: [subject]" or "Fwd: [subject]"
   // Strip the whole prefix up to where the actual message starts
   t = t.replace(/^(?:Re|Fwd|FW|RE|FWD):\s*[^\n.!?]{0,120}?(?=\s+(?:Hi|Hello|Hey|Good\s+(?:morning|afternoon|evening)|I\s|My\s|It\s|This\s|The\s|Please|Can\s|I've|I'm|I'd|I'll))/gi, '');
@@ -257,6 +263,17 @@ function stripPII(text) {
   // "Subject: FirstName LastName" in email subjects
   t = t.replace(/^Subject:\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s*$/im, '');
   t = t.replace(/^Subject:\s*[A-Z][a-z]+\s+[A-Z][a-z]+\s+/im, 'Subject: ');
+  // Name signatures at END of message — "-- Firstname Lastname", "- Firstname Lastname", "Firstname Lastname" alone
+  // Covers: email sign-offs, SMS sign-offs, voice transcript names
+  t = t.replace(/\s*[-–—]{1,2}\s*[A-Z][a-z]{1,20}(?:\s+[A-Z][a-z]{1,20}){1,2}\s*$/g, '');
+  t = t.replace(/(?<=\.\s{0,3}|\?\s{0,3}|!\s{0,3}|thank\s+you\.?\s*)[A-Z][a-z]{1,20}(?:\s+[A-Z][a-z]{1,20}){1,2}\s*$/gi, '');
+  // #: or ORDER#: artifacts at start of quote
+  t = t.replace(/^[#\s]*:\s*/g, '');
+  // Unicode escape sequences appearing as literal text: |u200b, ​, ’, etc.
+  t = t.replace(/[|\\]u[0-9a-fA-F]{4}/g, '');
+  // Actual zero-width and invisible Unicode characters
+  t = t.replace(/[​‌‍‎‏­⁠﻿]/g, '');
+  // (Emoji already stripped at top of function)
   // DOB / date of birth
   t = t.replace(/\b(?:date of birth|dob|born(?:\s+on)?)[,:\s]+[^.!?;]{0,60}/gi, '');
   // Spoken number sequences (voice transcripts — 7+ digit words)
