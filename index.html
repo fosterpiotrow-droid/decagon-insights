@@ -230,6 +230,12 @@ function stripPII(text) {
   t = t.replace(/^(?:Re|Fwd|FW|RE|FWD):\s*[^\n.!?]{0,120}?(?=\s+(?:Hi|Hello|Hey|Good\s+(?:morning|afternoon|evening)|I\s|My\s|It\s|This\s|The\s|Please|Can\s|I've|I'm|I'd|I'll))/gi, '');
   // Any remaining Re:/Fwd: prefix at start
   t = t.replace(/^(?:Re|Fwd|FW|RE|FWD):\s*/gi, '');
+  // Bare subject line (no Re:) directly before a greeting — e.g. "Email &phone number update Hello..."
+  // or "Can't pay my bill Hello..." — any short content (≤65 chars) that does NOT start with "I "/"I'"
+  // and precedes a greeting word. Guards against stripping actual first-person opening sentences.
+  t = t.replace(/^(?![Ii]\s|[Ii]')[^.!?\n]{5,65}\s+(?=(?:Hi|Hello|Hey|Good\s+(?:morning|afternoon|evening))\b)/i, '');
+  // Clean up empty parentheses/brackets left after PII removal
+  t = t.replace(/[\(\[]\s*[\/|•\s]*\s*[\)\]]/g, '');
   // Email footer / signature patterns (company addresses, taglines, etc.)
   t = t.replace(/\b[A-Z][a-z]+(?: [A-Z][a-z]+)?,\s+[A-Z]{2}\b[^.!?]*/g, ''); // City, State
   t = t.replace(/\b(?:committed to (?:providing|delivering|offering)|caring counts)\b[^.!?]*/gi, '');
@@ -239,8 +245,11 @@ function stripPII(text) {
   t = t.replace(/\(?\b\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}\b/g, '');
   // SSN patterns
   t = t.replace(/\b\d{3}[\s\-]?\d{2}[\s\-]?\d{4}\b/g, '');
-  // Email addresses
+  // Email addresses — full (user@domain.tld) and partial without TLD (user@gmail, user@yahoo, etc.)
   t = t.replace(/\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g, '');
+  t = t.replace(/\b[A-Za-z0-9._%+\-]{3,}@(?:gmail|yahoo|hotmail|outlook|icloud|aol|comcast|att|verizon|msn)\b/gi, '');
+  // Anything in parentheses or brackets that contains an @ sign (partial email in parens)
+  t = t.replace(/[\(\[]\s*[^\)\]]*@[^\)\]]*[\)\]]/g, '');
   // "My name is X Y"
   t = t.replace(/\bmy name(?:\s+is)?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?/gi, '');
   // "I'm X Y" / "I am X Y" name introductions
@@ -275,7 +284,12 @@ function stripPII(text) {
   // Long hex/token strings
   t = t.replace(/[a-f0-9]{20,}/gi, '');
   // Clean up
-  t = t.replace(/\s+/g, ' ').replace(/^\s*[,;.•·\-]\s*/, '').trim();
+  // Final pass: clean up empty parentheses/brackets left after PII removal, dangling punctuation
+  t = t.replace(/[\(\[]\s*[\)\]]/g, '');          // () or []
+  t = t.replace(/[\(\[]\s*[\/|•\-,\s]+\s*[\)\]]/g, ''); // (/) (|) (•) etc.
+  t = t.replace(/\s{2,}/g, ' ');
+  t = t.replace(/\s+([\/|•,])/g, '$1');           // spaces before punctuation
+  t = t.replace(/\s+/g, ' ').replace(/^\s*[,;.•·\-\/|]\s*/, '').trim();
   return t;
 }
 
@@ -321,7 +335,7 @@ function extractUserTurns(raw) {
 function containsPII(text) {
   if (/\(?\b\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}\b/.test(text)) return true;   // phone
   if (/\b\d{3}[\s\-]?\d{2}[\s\-]?\d{4}\b/.test(text)) return true;             // SSN
-  if (/\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/.test(text)) return true; // email
+  if (/\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]{4,}(?:\.[A-Za-z]{2,})?\b/.test(text)) return true; // email (domain ≥4 chars, TLD optional)
   if (/\b[Pp]0\d{7,}\b/.test(text)) return true;                                // Perpay order #
   if (/\bOrder\s+#?\s*[A-Z]?\d{6,}\b/i.test(text)) return true;                // generic order #
   if (/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i.test(text)) return true; // UUID
