@@ -223,6 +223,18 @@ const productColors = {
 // ─── PII Stripper ───
 function stripPII(text) {
   let t = text;
+  // Unicode BOM and other zero-width characters
+  t = t.replace(/[﻿​‌‍­]/g, '');
+  // Email thread subject prefixes: "Re: [subject]" or "Fwd: [subject]"
+  // Strip the whole prefix up to where the actual message starts
+  t = t.replace(/^(?:Re|Fwd|FW|RE|FWD):\s*[^\n.!?]{0,120}?(?=\s+(?:Hi|Hello|Hey|Good\s+(?:morning|afternoon|evening)|I\s|My\s|It\s|This\s|The\s|Please|Can\s|I've|I'm|I'd|I'll))/gi, '');
+  // Any remaining Re:/Fwd: prefix at start
+  t = t.replace(/^(?:Re|Fwd|FW|RE|FWD):\s*/gi, '');
+  // Email footer / signature patterns (company addresses, taglines, etc.)
+  t = t.replace(/\b[A-Z][a-z]+(?: [A-Z][a-z]+)?,\s+[A-Z]{2}\b[^.!?]*/g, ''); // City, State
+  t = t.replace(/\b(?:committed to (?:providing|delivering|offering)|caring counts)\b[^.!?]*/gi, '');
+  t = t.replace(/\[Image\][^.!?]*/gi, '');
+  t = t.replace(/[®™©]\s*[^.!?]{0,60}/g, ''); // Trademark symbols + following text
   // Phone numbers (digit format)
   t = t.replace(/\(?\b\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}\b/g, '');
   // SSN patterns
@@ -267,7 +279,7 @@ function stripPII(text) {
   return t;
 }
 
-// ─── Customer text extractor ───
+// ─── Customer text extractor ─ returns single concatenated string for pattern-matching ───
 function extractUserText(raw) {
   if (!raw || typeof raw !== "string") return "";
   if (/['"]role['"]\s*:\s*['"](?:USER|user|customer)['"]/i.test(raw) || /['"]text['"]\s*:\s*['"]/.test(raw)) {
@@ -285,6 +297,40 @@ function extractUserText(raw) {
   return raw.replace(/\\n/g, " ").replace(/\s+/g, " ").trim();
 }
 
+// ─── Extract individual customer turns (for quotes) ─ returns array of cleaned strings ───
+function extractUserTurns(raw) {
+  if (!raw || typeof raw !== "string") return [];
+  const decode = t => t.replace(/\\n/g, " ").replace(/\\r/g, "").replace(/\\t/g, " ")
+                       .replace(/\\'/g, "'").replace(/\\"/g, '"').replace(/\\\\/g, "\\")
+                       .replace(/\s+/g, " ").trim();
+  if (/['"]role['"]\s*:\s*['"](?:USER|user|customer)['"]/i.test(raw) || /['"]text['"]\s*:\s*['"]/.test(raw)) {
+    const turns = [];
+    const re1 = /['"]role['"]\s*:\s*['"](?:USER|user|customer)['"][^}]{0,600}?['"]text['"]\s*:\s*'((?:[^'\\]|\\.)*)'/gi;
+    const re2 = /['"]role['"]\s*:\s*['"](?:USER|user|customer)['"][^}]{0,600}?['"]text['"]\s*:\s*"((?:[^"\\]|\\.)*)"/gi;
+    const re3 = /['"]text['"]\s*:\s*'((?:[^'\\]|\\.)*)'[^}]{0,600}?['"]role['"]\s*:\s*['"](?:USER|user|customer)['"]/gi;
+    const re4 = /['"]text['"]\s*:\s*"((?:[^"\\]|\\.)*)"[^}]{0,600}?['"]role['"]\s*:\s*['"](?:USER|user|customer)['"]/gi;
+    let m;
+    [re1, re2, re3, re4].forEach(re => { while ((m = re.exec(raw)) !== null) turns.push(decode(m[1])); });
+    if (turns.length > 0) return turns.filter(t => t.length > 8);
+  }
+  // Fallback: entire raw field as one turn
+  return [decode(raw)].filter(t => t.length > 8);
+}
+
+// ─── Strict PII detector — returns true if text still contains identifiable PII ───
+function containsPII(text) {
+  if (/\(?\b\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}\b/.test(text)) return true;   // phone
+  if (/\b\d{3}[\s\-]?\d{2}[\s\-]?\d{4}\b/.test(text)) return true;             // SSN
+  if (/\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/.test(text)) return true; // email
+  if (/\b[Pp]0\d{7,}\b/.test(text)) return true;                                // Perpay order #
+  if (/\bOrder\s+#?\s*[A-Z]?\d{6,}\b/i.test(text)) return true;                // generic order #
+  if (/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i.test(text)) return true; // UUID
+  if (/\b\d{9,}\b/.test(text)) return true;                                     // any 9+ digit number
+  if (/\bmy name(?:\s+is)?\s+[A-Z][a-z]/i.test(text)) return true;             // name introduction
+  if (/\b(?:Hi|Hello),?\s+I(?:'m| am)\s+[A-Z][a-z]/i.test(text)) return true; // "Hi I'm Name"
+  return false;
+}
+
 function isCustomerSentence(s) {
   if (/\b(?:I'?m|I am)\s+(?:Franklin|the AI|an AI|a virtual|your virtual|your AI)\b/i.test(s)) return false;
   if (/\bAI assistant\b/i.test(s)) return false;
@@ -294,6 +340,15 @@ function isCustomerSentence(s) {
   if (/\b(?:transferred to|escalated to|assigned to|routing to|representative will|team will)\b/i.test(s)) return false;
   if (/^(?:Hi|Hello|Hey|Good (?:morning|afternoon|evening)|Thanks|Thank you|Ok|Okay|Sure|Yes|No|Alright)\s*[.!,]?\s*$/i.test(s)) return false;
   if (s.length < 15 && /^(?:ok|yes|no|sure|thanks|thank you|got it|alright|okay|fine|yep|nope|right)\b/i.test(s)) return false;
+  // Email footers / signatures / company boilerplate
+  if (/\bwww\.[a-z0-9\-]+\.[a-z]{2,}\b/i.test(s)) return false; // contains a website URL
+  if (/\b[A-Z][a-z]+(?: [A-Z][a-z]+)?,\s+[A-Z]{2}\b/.test(s)) return false; // City, ST pattern
+  if (/\bcommitted to (?:providing|delivering|offering)\b/i.test(s)) return false;
+  if (/\bcaring counts\b/i.test(s)) return false;
+  if (/\[Image\]/i.test(s)) return false; // image placeholder from email client
+  if (/[®™©]/.test(s)) return false; // trademark symbols → likely company content
+  if (/\b(?:BOX\s+\d+|P\.?O\.?\s*Box)\b/i.test(s)) return false; // PO Box address lines
+  if (/\bEmail:\s*\[/i.test(s)) return false; // "Email: [Image]" signature block
   return true;
 }
 
@@ -328,6 +383,10 @@ function detectPositiveHighlight(rows, headerMap) {
     const sentences = userText.split(/(?<=[.!?])\s+|(?:\.\s)|(?:\?\s)|(?:!\s)/).map(s => s.trim()).filter(s => s.length > 15 && s.length < 300);
     for (const sentence of sentences) {
       if (!POSITIVE_PATTERNS.some(p => p.test(sentence))) continue;
+      // Reject email footers / company boilerplate — these are never customer quotes
+      if (!isCustomerSentence(sentence)) continue;
+      // Must sound like a genuine first-person customer voice
+      if (!/\b(?:I|my|me|we|our)\b/i.test(sentence)) continue;
       let score = 0;
       if (/\b(?:love|loved|amazing|wonderful|fantastic|excellent|outstanding)\b/i.test(sentence)) score += 8;
       if (/\bREALLY\s+APPRECIATE\b/i.test(sentence)) score += 12;
@@ -379,22 +438,47 @@ function analyzeConversations(rows, headerMap) {
       if (issueProduct === "Core" && !mentionsCore && (mentionsCard || mentionsMarketplace || mentionsPerpayPlus)) productMismatch = true;
       if (productMismatch) continue;
       matched = true;
-      // Quotes: ONLY sentences that specifically match THIS issue's patterns AND have complaint substance
-      const matchingQuotes = sentences.filter(s => {
-        if (!issue.patterns.some(p => p.test(s))) return false;
-        // Must be substantive — at least 8 words
-        if (s.split(/\s+/).length < 6) return false;
-        // Must have either first-person voice or a specific descriptor
-        if (!/\b(I|my|me|it|this|the|can't|won't|doesn't|isn't|hasn't|didn't)\b/i.test(s)) return false;
-        return true;
-      });
       if (!themeMap[issue.id]) {
         themeMap[issue.id] = { ...issue, conversations: [], quotes: new Set() };
       }
       themeMap[issue.id].conversations.push({ id, date, text: userText, excerpt: userText.slice(0, 280) });
-      matchingQuotes.forEach(q => {
-        const cleaned = cleanQuote(q);
-        if (cleaned.length > 25 && isCustomerSentence(cleaned)) themeMap[issue.id].quotes.add(cleaned);
+
+      // ── Quote selection: use whole customer turns, not sentence fragments ──
+      // Strip PII from each turn FIRST, then check pattern match.
+      const turns = extractUserTurns(raw);
+      turns.forEach(rawTurn => {
+        // Step 1: strip PII from the raw turn before any other processing
+        const cleanedTurn = stripPII(rawTurn);
+        if (!cleanedTurn || cleanedTurn.length < 20) return;
+        // Step 2: hard-reject if PII survived stripping
+        if (containsPII(cleanedTurn)) return;
+        // Step 3: must be actual customer speech
+        if (!isCustomerSentence(cleanedTurn)) return;
+        // Step 4: must have first-person voice
+        if (!/\b(I|my|me|I'm|I've|I'd|I'll|we|our)\b/i.test(cleanedTurn)) return;
+        // Step 5: must be substantive (≥7 words)
+        if (cleanedTurn.split(/\s+/).length < 7) return;
+
+        // Step 6: does this turn (or any sentence within it) match the issue?
+        if (issue.patterns.some(p => p.test(cleanedTurn))) {
+          // Turn is short enough to use whole (≤320 chars) — ideal, cleanest quote
+          if (cleanedTurn.length <= 320) {
+            const q = cleanQuote(cleanedTurn);
+            if (q.length > 25 && !containsPII(q)) themeMap[issue.id].quotes.add(q);
+          } else {
+            // Turn is long (e.g. email body) — extract the most relevant sentence from it
+            const sents = cleanedTurn.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.length > 20 && s.length < 320);
+            for (const s of sents) {
+              if (!issue.patterns.some(p => p.test(s))) continue;
+              if (!/\b(I|my|me|I'm|I've|I'd|I'll)\b/i.test(s)) continue;
+              if (s.split(/\s+/).length < 7) continue;
+              if (containsPII(s)) continue;
+              if (!isCustomerSentence(s)) continue;
+              const q = cleanQuote(s);
+              if (q.length > 25 && !containsPII(q)) themeMap[issue.id].quotes.add(q);
+            }
+          }
+        }
       });
     }
     if (matched) totalRelevant++;
@@ -404,13 +488,10 @@ function analyzeConversations(rows, headerMap) {
   const themes = Object.values(themeMap).map(t => {
     const count = t.conversations.length;
     const frequency = count >= 8 ? "High" : count >= 3 ? "Medium" : "Low";
-    const rankedQuotes = Array.from(t.quotes).filter(isCustomerSentence).map(q => {
+    const rankedQuotes = Array.from(t.quotes).filter(q => isCustomerSentence(q) && !containsPII(q)).map(q => {
       let score = 0;
       const len = q.length;
-      // Hard reject: if PII markers remain after stripping
-      if (/\b\d{10,}\b/.test(q)) score -= 20;
-      if (/[Pp]0\d{6,}/.test(q)) score -= 20;
-      if (/\(?\d{3}\)?\s*\d{3}\s*\d{4}/.test(q)) score -= 20;
+      // Hard reject — these should never reach here, but catch any stragglers
       if (/Repayment\s*[•]/.test(q)) score -= 20;
       // Hard reject: pure command with no context
       if (/^(?:please\s+)?(?:cancel|refund|return|fix|stop|help)\s*[.!]?\s*$/i.test(q)) score -= 25;
