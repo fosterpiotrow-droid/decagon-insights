@@ -592,6 +592,79 @@ function cleanArchiveQuotes(archives) {
   });
 }
 
+// ─── Claude API helper ───
+async function callClaudeAPI(apiKey, prompt) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 600,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `API error ${res.status}`);
+  }
+  const data = await res.json();
+  return data.content[0].text;
+}
+
+// ─── AI quote enhancer — runs after pattern matching, sends only cleaned text ───
+async function enhanceWithAI(themes, apiKey, onProgress) {
+  const enhanced = [];
+  for (let i = 0; i < themes.length; i++) {
+    const theme = themes[i];
+    onProgress(i + 1, themes.length, theme.theme);
+    // Pull conversation texts, strip PII, hard-reject any remaining PII
+    const candidates = (theme.conversations || [])
+      .slice(0, 18)
+      .map(c => stripPII(c.text || c.excerpt || ''))
+      .filter(t => t.length > 30 && !containsPII(t) && isCustomerSentence(t));
+    if (candidates.length === 0) { enhanced.push(theme); continue; }
+    const prompt = `You are reviewing customer support messages for Perpay (a fintech/BNPL company). All personal information has already been removed from these messages.
+
+Theme you are finding quotes for: "${theme.theme}"
+What this theme is about: ${theme.summary}
+
+Customer messages (${candidates.length} total):
+${candidates.map((c, idx) => `[${idx + 1}] ${c}`).join('\n\n')}
+
+Task: Select the 3 best verbatim customer quotes that most clearly illustrate the "${theme.theme}" issue. Pick quotes that:
+- Are a complete, natural sentence from the customer (not a fragment)
+- Directly show the specific problem described by this theme
+- Express the customer's genuine experience or frustration
+- Contain zero names, emails, phone numbers, or account numbers
+
+Return ONLY a valid JSON array of strings. Example format:
+["quote one here", "quote two here", "quote three here"]
+
+If fewer than 3 quotes are suitable, return fewer. No explanation, no other text — just the JSON array.`;
+    try {
+      const raw = await callClaudeAPI(apiKey, prompt);
+      const match = raw.match(/\[[\s\S]*?\]/);
+      if (match) {
+        const quotes = JSON.parse(match[0]);
+        if (Array.isArray(quotes) && quotes.length > 0) {
+          const clean = quotes
+            .filter(q => typeof q === 'string' && q.length > 20 && !containsPII(q) && isCustomerSentence(q))
+            .map(q => cleanQuote(q))
+            .slice(0, 3);
+          if (clean.length > 0) { enhanced.push({ ...theme, quotes: clean, aiEnhanced: true }); continue; }
+        }
+      }
+    } catch (e) { console.warn('AI quote selection failed for', theme.theme, e.message); }
+    enhanced.push(theme); // fallback to pattern-matched quotes
+  }
+  return enhanced;
+}
+
 // ─── UI components ───
 const freqColors = { High: "#DC2626", Medium: "#F59E0B", Low: "#6B7280" };
 function Badge({ label, color, bg }) {
@@ -625,6 +698,7 @@ function ThemeCard({ theme, rank, totalConvs }) {
             <Badge label={theme.product.toUpperCase()} color="#fff" bg={c.badge} />
             {rank && <Badge label={`#${rank} CRITICAL`} color="#fff" bg="#DC2626" />}
             <Badge label={theme.frequency} color={freqColors[theme.frequency]} bg={theme.frequency === "High" ? "#FEF2F2" : theme.frequency === "Medium" ? "#FFFBEB" : "#F9FAFB"} />
+            {theme.aiEnhanced && <Badge label="✨ AI Quotes" color="#6D28D9" bg="#EDE9FE" />}
           </div>
           <h4 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: "#111827", lineHeight: 1.4 }}>{theme.theme}</h4>
         </div>
@@ -718,7 +792,7 @@ function ProductSection({ product, themes, totalConvs }) {
 }
 
 // ─── Upload Tab ───
-function UploadTab({ onAnalyze, isAnalyzing }) {
+function UploadTab({ onAnalyze, isAnalyzing, aiMode, aiProgress }) {
   const fileRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
   const [fileName, setFileName] = useState(null);
@@ -770,7 +844,13 @@ function UploadTab({ onAnalyze, isAnalyzing }) {
         <div style={{ fontSize: 13, color: "#9CA3AF", marginTop: 6 }}>Supports .csv exported from Decagon</div>
       </div>
       {error && <div style={{ marginTop: 16, padding: "12px 16px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 8, color: "#DC2626", fontSize: 13 }}>{error}</div>}
-      {isAnalyzing && (
+      {aiMode && (
+        <div style={{ marginTop: 16, padding: "12px 16px", background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 8, color: "#4338CA", fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+          <span>✨</span>
+          <span><strong>AI Mode on</strong> — after pattern matching, Claude will select the best verbatim quote for each theme. Only PII-free text is sent.</span>
+        </div>
+      )}
+      {isAnalyzing && !aiProgress && (
         <div style={{ marginTop: 24, textAlign: "center" }}>
           <div style={{ display: "inline-block", width: 24, height: 24, border: "3px solid #E5E7EB", borderTop: "3px solid #6366F1", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
           <div style={{ marginTop: 8, fontSize: 14, color: "#6366F1", fontWeight: 500 }}>Analyzing conversations...</div>
@@ -778,7 +858,7 @@ function UploadTab({ onAnalyze, isAnalyzing }) {
       )}
       <div style={{ marginTop: 32, padding: "20px 24px", background: "#F9FAFB", borderRadius: 10, border: "1px solid #E5E7EB" }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>How it works</div>
-        <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6 }}>Each conversation is matched against a catalog of specific product issues. Quotes shown under a theme come only from sentences that directly match that issue's patterns — with all personal information automatically removed before display.</div>
+        <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6 }}>{aiMode ? 'Conversations are first matched against a catalog of product issues. Then Claude reviews the matched conversations and selects the most illustrative verbatim quotes — with all personal information removed before anything is sent.' : 'Each conversation is matched against a catalog of specific product issues. Quotes shown under a theme come only from sentences that directly match that issue\'s patterns — with all personal information automatically removed before display.'}</div>
       </div>
     </div>
   );
@@ -956,11 +1036,73 @@ function ArchiveTab({ archives, onDelete, onClearAll, onExportSite }) {
   );
 }
 
+// ─── Settings Panel ───
+function SettingsPanel({ apiKey, setApiKey, aiMode, setAiMode, onClose }) {
+  const [keyVisible, setKeyVisible] = useState(false);
+  const [testStatus, setTestStatus] = useState(null);
+  const testKey = async () => {
+    if (!apiKey.trim()) return;
+    setTestStatus('testing');
+    try {
+      await callClaudeAPI(apiKey.trim(), 'Reply with the single word: ok');
+      setTestStatus('ok');
+    } catch (e) { setTestStatus('error:' + e.message); }
+  };
+  return (
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", paddingTop: 70 }}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: "28px 32px", width: "100%", maxWidth: 480, boxShadow: "0 20px 60px rgba(0,0,0,0.2)", position: "relative" }}>
+        <button onClick={onClose} style={{ position: "absolute", top: 16, right: 16, background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#9CA3AF" }}>✕</button>
+        <h3 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700, color: "#111827" }}>Analysis Settings</h3>
+        <p style={{ margin: "0 0 24px", fontSize: 13, color: "#6B7280" }}>Configure how conversations are analyzed and quotes are selected.</p>
+
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 10 }}>Analysis Mode</div>
+          <div style={{ display: "flex", gap: 10 }}>
+            {[{ id: false, label: "⚡ Fast Mode", desc: "Pattern matching — instant, works offline" },
+              { id: true,  label: "✨ AI Mode",   desc: "Claude selects quotes — better quality" }].map(m => (
+              <button key={String(m.id)} onClick={() => setAiMode(m.id)}
+                style={{ flex: 1, padding: "12px 16px", borderRadius: 10, border: `2px solid ${aiMode === m.id ? "#6366F1" : "#E5E7EB"}`, background: aiMode === m.id ? "#EEF2FF" : "#fff", cursor: "pointer", textAlign: "left" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: aiMode === m.id ? "#6366F1" : "#374151" }}>{m.label}</div>
+                <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 3 }}>{m.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {aiMode && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Anthropic API Key</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <input type={keyVisible ? "text" : "password"} value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-ant-..." style={{ flex: 1, padding: "10px 12px", borderRadius: 8, border: "1px solid #D1D5DB", fontSize: 13, outline: "none", fontFamily: "monospace" }} />
+              <button onClick={() => setKeyVisible(v => !v)} style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #D1D5DB", background: "#F9FAFB", cursor: "pointer", fontSize: 13 }}>{keyVisible ? "Hide" : "Show"}</button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button onClick={testKey} disabled={!apiKey.trim() || testStatus === 'testing'} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #D1D5DB", background: "#F9FAFB", cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#374151" }}>
+                {testStatus === 'testing' ? 'Testing…' : 'Test Key'}
+              </button>
+              {testStatus === 'ok' && <span style={{ color: "#10B981", fontSize: 12, fontWeight: 600 }}>✓ Connected</span>}
+              {testStatus && testStatus.startsWith('error:') && <span style={{ color: "#DC2626", fontSize: 12 }}>{testStatus.replace('error:', '')}</span>}
+            </div>
+            <div style={{ marginTop: 12, padding: "10px 14px", background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 8, fontSize: 11, color: "#92400E", lineHeight: 1.6 }}>
+              🔒 Your API key stays in your browser's memory only — it is never saved to disk or sent anywhere except directly to Anthropic's API. Only PII-stripped customer text is sent. Get a key at <strong>console.anthropic.com</strong>.
+            </div>
+          </div>
+        )}
+        <button onClick={onClose} style={{ width: "100%", padding: "12px", borderRadius: 8, background: "#6366F1", color: "#fff", border: "none", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Done</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ───
 function DecagonInsights() {
   const [tab, setTab] = useState("archive");
   const [analysis, setAnalysis] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiProgress, setAiProgress] = useState(null); // { current, total, theme }
+  const [apiKey, setApiKey] = useState('');
+  const [aiMode, setAiMode] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [archives, setArchives] = useState(function() {
     try {
       if (window.__DECAGON_EMBEDDED_ARCHIVES__ && window.__DECAGON_EMBEDDED_ARCHIVES__.length > 0) {
@@ -977,18 +1119,38 @@ function DecagonInsights() {
     try { localStorage.setItem("decagon-archives", JSON.stringify(archives)); } catch (e) {}
   }, [archives]);
 
-  const handleAnalyze = useCallback((data, headerMap, weekLabel, fileName) => {
+  const handleAnalyze = useCallback(async (data, headerMap, weekLabel, fileName) => {
     setIsAnalyzing(true);
+    setAiProgress(null);
     setCurrentWeekLabel(weekLabel);
     setCurrentFileName(fileName);
-    setTimeout(() => {
-      const result = analyzeConversations(data, headerMap);
-      if (result.error) { alert(result.error); setIsAnalyzing(false); return; }
+    // Phase 1: fast pattern-matching (run off main thread via setTimeout)
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const result = analyzeConversations(data, headerMap);
+    if (result.error) { alert(result.error); setIsAnalyzing(false); return; }
+    // Phase 2: optional AI quote enhancement
+    if (aiMode && apiKey.trim()) {
+      try {
+        const enhancedThemes = await enhanceWithAI(
+          result.themes, apiKey.trim(),
+          (current, total, theme) => setAiProgress({ current, total, theme })
+        );
+        const enhancedByProduct = {};
+        PRODUCT_ORDER.forEach(p => { enhancedByProduct[p] = []; });
+        enhancedThemes.forEach(t => { if (enhancedByProduct[t.product]) enhancedByProduct[t.product].push(t); });
+        const enhancedTop5 = enhancedThemes.slice(0, 5);
+        setAnalysis({ ...result, themes: enhancedThemes, byProduct: enhancedByProduct, top5: enhancedTop5 });
+      } catch (e) {
+        alert('AI enhancement failed: ' + e.message + '\n\nShowing pattern-matched results instead.');
+        setAnalysis(result);
+      }
+    } else {
       setAnalysis(result);
-      setIsAnalyzing(false);
-      setTab("insights");
-    }, 600);
-  }, []);
+    }
+    setIsAnalyzing(false);
+    setAiProgress(null);
+    setTab("insights");
+  }, [aiMode, apiKey]);
 
   const handleSaveToArchive = useCallback(function() {
     if (!analysis) return;
@@ -1022,6 +1184,7 @@ function DecagonInsights() {
   return (
     <div style={{ minHeight: "100vh", background: "#F9FAFB", fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      {showSettings && <SettingsPanel apiKey={apiKey} setApiKey={setApiKey} aiMode={aiMode} setAiMode={setAiMode} onClose={() => setShowSettings(false)} />}
       <div style={{ background: "#fff", borderBottom: "1px solid #E5E7EB", padding: "0 24px" }}>
         <div style={{ maxWidth: 960, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 60 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1031,19 +1194,36 @@ function DecagonInsights() {
               <div style={{ fontSize: 11, color: "#9CA3AF", lineHeight: 1 }}>Perpay Product Intelligence</div>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 2 }}>
-            {tabs.map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)}
-                style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: tab === t.id ? "#EEF2FF" : "transparent", color: tab === t.id ? "#6366F1" : "#6B7280", fontSize: 13, fontWeight: tab === t.id ? 600 : 400, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-                <span>{t.icon}</span>{t.label}
-                {t.badge && <span style={{ background: tab === t.id ? "#6366F1" : "#D1D5DB", color: "#fff", borderRadius: 10, padding: "0 6px", fontSize: 11, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{t.badge}</span>}
-              </button>
-            ))}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "flex", gap: 2 }}>
+              {tabs.map(t => (
+                <button key={t.id} onClick={() => setTab(t.id)}
+                  style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: tab === t.id ? "#EEF2FF" : "transparent", color: tab === t.id ? "#6366F1" : "#6B7280", fontSize: 13, fontWeight: tab === t.id ? 600 : 400, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>{t.icon}</span>{t.label}
+                  {t.badge && <span style={{ background: tab === t.id ? "#6366F1" : "#D1D5DB", color: "#fff", borderRadius: 10, padding: "0 6px", fontSize: 11, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{t.badge}</span>}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowSettings(true)} title="Settings"
+              style={{ padding: "7px 10px", borderRadius: 8, border: `1px solid ${aiMode ? "#C7D2FE" : "#E5E7EB"}`, background: aiMode ? "#EEF2FF" : "#F9FAFB", color: aiMode ? "#6366F1" : "#6B7280", cursor: "pointer", fontSize: 15, display: "flex", alignItems: "center", gap: 5 }}>
+              ⚙️{aiMode && <span style={{ fontSize: 11, fontWeight: 600 }}>AI</span>}
+            </button>
           </div>
         </div>
       </div>
+      {/* AI progress banner */}
+      {isAnalyzing && aiProgress && (
+        <div style={{ background: "linear-gradient(90deg, #6366F1, #8B5CF6)", padding: "10px 24px", color: "#fff", display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 18, height: 18, border: "2px solid rgba(255,255,255,0.4)", borderTop: "2px solid #fff", borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>✨ AI selecting quotes — theme {aiProgress.current} of {aiProgress.total}</div>
+            <div style={{ fontSize: 11, opacity: 0.8, marginTop: 2 }}>{aiProgress.theme}</div>
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.7 }}>{Math.round((aiProgress.current / aiProgress.total) * 100)}%</div>
+        </div>
+      )}
       <div style={{ maxWidth: 960, margin: "0 auto" }}>
-        {tab === "upload" && <UploadTab onAnalyze={handleAnalyze} isAnalyzing={isAnalyzing} />}
+        {tab === "upload" && <UploadTab onAnalyze={handleAnalyze} isAnalyzing={isAnalyzing} aiMode={aiMode} aiProgress={aiProgress} />}
         {tab === "insights" && <InsightsTab analysis={analysis} onSaveToArchive={handleSaveToArchive} />}
         {tab === "archive" && <ArchiveTab archives={archives} onDelete={handleDeleteArchive} onClearAll={handleClearAll} onExportSite={handleExportSite} />}
       </div>
