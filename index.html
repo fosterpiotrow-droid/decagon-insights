@@ -438,6 +438,39 @@ function detectPositiveHighlight(rows, headerMap) {
   return bestQuote ? { quote: bestQuote } : null;
 }
 
+// ─── Strip KNOWN per-row PII using exact metadata values ───
+// This is far more accurate than regex guessing — we know the customer's actual name/email/phone.
+function stripKnownPII(text, { firstName, lastName, metaName, email, phone, subject, orderNum } = {}) {
+  let t = text;
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Strip email subject from very start of text (exact match)
+  if (subject && subject.length > 3) {
+    t = t.replace(new RegExp('^(?:Re:\\s*|Fwd:\\s*)?' + esc(subject) + '\\s*', 'i'), '');
+  }
+  // Strip known names — exact word-boundary match
+  const names = [firstName, lastName, metaName].filter(n => n && n.trim().length > 2);
+  names.forEach(name => {
+    t = t.replace(new RegExp('\\b' + esc(name.trim()) + '\\b', 'gi'), '');
+  });
+  // Strip known email address (exact)
+  if (email && email.includes('@')) {
+    t = t.replace(new RegExp(esc(email.trim()), 'gi'), '');
+  }
+  // Strip known phone number (exact, ignoring formatting)
+  if (phone && phone.replace(/\D/g, '').length >= 7) {
+    const digits = phone.replace(/\D/g, '');
+    // Match with any common formatting
+    t = t.replace(new RegExp(digits.split('').join('[\\s.\\-]?'), 'g'), '');
+    t = t.replace(new RegExp(esc(phone.trim()), 'g'), '');
+  }
+  // Strip known order number
+  if (orderNum && orderNum.trim().length > 3) {
+    t = t.replace(new RegExp('\\b' + esc(orderNum.trim()) + '\\b', 'gi'), '');
+  }
+  return t.replace(/\s+/g, ' ').trim();
+}
+
 // ─── Analysis Engine ───
 function analyzeConversations(rows, headerMap) {
   const msgField = headerMap.message;
@@ -448,7 +481,17 @@ function analyzeConversations(rows, headerMap) {
   let totalRelevant = 0;
   rows.forEach((row, idx) => {
     const raw = row[msgField] || "";
-    const userText = extractUserText(raw);
+    // ── Extract per-row known PII from Decagon metadata columns ──
+    const rowMeta = {
+      firstName: (row[headerMap.firstName] || '').trim(),
+      lastName:  (row[headerMap.lastName]  || '').trim(),
+      metaName:  (row[headerMap.metaName]  || '').trim(),
+      email:     (row[headerMap.email]     || '').trim(),
+      phone:     (row[headerMap.phone]     || '').trim(),
+      subject:   (row[headerMap.subject]   || '').trim(),
+      orderNum:  (row[headerMap.orderNum]  || '').trim(),
+    };
+    const userText = stripKnownPII(extractUserText(raw), rowMeta);
     if (!userText || userText.length < 15) return;
     const id = idField ? row[idField] : `conv-${idx + 1}`;
     const date = dateField ? row[dateField] : null;
@@ -475,11 +518,11 @@ function analyzeConversations(rows, headerMap) {
       themeMap[issue.id].conversations.push({ id, date, text: userText, excerpt: userText.slice(0, 280) });
 
       // ── Quote selection: use whole customer turns, not sentence fragments ──
-      // Strip PII from each turn FIRST, then check pattern match.
+      // Strip PII from each turn FIRST (both known metadata PII and regex PII), then check pattern match.
       const turns = extractUserTurns(raw);
       turns.forEach(rawTurn => {
-        // Step 1: strip PII from the raw turn before any other processing
-        const cleanedTurn = stripPII(rawTurn);
+        // Step 1: strip KNOWN PII (name/email/phone from metadata) then regex PII
+        const cleanedTurn = stripPII(stripKnownPII(rawTurn, rowMeta));
         if (!cleanedTurn || cleanedTurn.length < 20) return;
         // Step 2: hard-reject if PII survived stripping
         if (containsPII(cleanedTurn)) return;
@@ -816,10 +859,23 @@ function UploadTab({ onAnalyze, isAnalyzing, aiMode, aiProgress }) {
         const headerMap = {};
         headers.forEach(h => {
           const lower = h.toLowerCase().replace(/[^a-z0-9]/g, "_");
+          // Primary message column — "Messages" has raw transcript turns; "Formatted Messages" is secondary
+          if (lower === "formatted_messages") headerMap.formattedMessages = h;
           if (["message","conversation","text","content","body","transcript","messages","conversation_text"].includes(lower)) headerMap.message = h;
-          if (["id","conversation_id","ticket_id","case_id","case_number"].includes(lower)) headerMap.id = h;
+          if (["id","conversation_id","ticket_id","case_id","case_number","conversation_id"].includes(lower)) headerMap.id = h;
           if (["date","created_at","timestamp","created","date_created","created_date"].includes(lower)) headerMap.date = h;
+          // Decagon metadata columns — used for precise PII removal
+          if (h === "metadata.firstName" || lower === "metadata_firstname") headerMap.firstName = h;
+          if (h === "metadata.lastName"  || lower === "metadata_lastname")  headerMap.lastName  = h;
+          if (h === "metadata.name"      || lower === "metadata_name")      headerMap.metaName  = h;
+          if (h === "metadata.email"     || lower === "metadata_email")     headerMap.email     = h;
+          if (h === "metadata.user_phone_number" || lower === "metadata_user_phone_number") headerMap.phone = h;
+          if (h === "metadata.subject"   || lower === "metadata_subject")   headerMap.subject   = h;
+          if (h === "metadata.order_number" || lower === "metadata_order_number") headerMap.orderNum = h;
         });
+        // Use "Messages" (raw transcript) for quote extraction — it has structured role/text turns
+        // "Formatted Messages" is only a fallback if Messages is absent
+        if (!headerMap.message && headerMap.formattedMessages) headerMap.message = headerMap.formattedMessages;
         onAnalyze(results.data, headerMap, weekLabel, file.name);
       },
       error: () => setError("Failed to read file. Please try again.")
