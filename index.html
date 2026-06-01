@@ -292,6 +292,11 @@ function stripPII(text) {
   // "Sent from" device/email client signatures
   t = t.replace(/\bSent from\s+(?:my\s+)?[^\n.]{0,40}(?:\n|\.|\s*$)/gi, '');
   t = t.replace(/\b(?:Yahoo Mail|Gmail|Outlook)[:\s—]+[^\n.]{0,40}/gi, '');
+  // "thank you Gmail/Outlook/Yahoo" at end — email client appended to message
+  t = t.replace(/\s*\bthank\s+you\s+(?:gmail|yahoo|outlook|hotmail|icloud|aol|mail)\s*\.?\s*$/gi, '');
+  // Voice transcript noise / garbled ASR words that appear before key phrases
+  // e.g. "by my drama" is often a garbled "by my" + misheard word
+  t = t.replace(/\bby\s+my\s+drama\b/gi, '');
   // Perpay repayment/order detail format "Repayment • $X.XX • Date • (Product)"
   t = t.replace(/(?:Repayment|Awaiting Payment|Payment)\s*[•\-]\s*\$[\d.,]+\s*[•\-][^.!?\n]*/gi, '');
   // "Uploaded file: URL"
@@ -380,6 +385,12 @@ function isCustomerSentence(s) {
   if (/[®™©]/.test(s)) return false; // trademark symbols → likely company content
   if (/\b(?:BOX\s+\d+|P\.?O\.?\s*Box)\b/i.test(s)) return false; // PO Box address lines
   if (/\bEmail:\s*\[/i.test(s)) return false; // "Email: [Image]" signature block
+  // Email client name artifacts at end of message
+  if (/\bthank\s+you\s+(?:gmail|yahoo|outlook|hotmail|icloud|aol|mail)\s*\.?\s*$/i.test(s)) return false;
+  if (/\bsent\s+(?:via|from|with)\s+(?:gmail|yahoo|outlook|mail)\b/i.test(s)) return false;
+  // Reject sentence fragments — must start with a capital letter, a digit, or a known opener
+  // "to my payroll...", "and I didn't...", "but they..." are all mid-sentence fragments
+  if (/^[a-z]/.test(s) && !/^(?:i\b|my\b|it\b)/i.test(s)) return false;
   return true;
 }
 
@@ -533,24 +544,42 @@ function analyzeConversations(rows, headerMap) {
         // Step 5: must be substantive (≥7 words)
         if (cleanedTurn.split(/\s+/).length < 7) return;
 
-        // Step 6: does this turn (or any sentence within it) match the issue?
-        if (issue.patterns.some(p => p.test(cleanedTurn))) {
-          // Turn is short enough to use whole (≤320 chars) — ideal, cleanest quote
-          if (cleanedTurn.length <= 320) {
-            const q = cleanQuote(cleanedTurn);
+        // Step 6: does this turn (or any sentence within it) DIRECTLY match the issue?
+        const turnMatchCount = issue.patterns.filter(p => p.test(cleanedTurn)).length;
+        if (turnMatchCount === 0) return; // no match at all
+
+        // Cross-theme guard: if another issue matches MORE strongly, this turn belongs there
+        const dominantIssueId = ISSUE_CATALOG.reduce((best, other) => {
+          if (other.id === issue.id) return best;
+          const otherCount = other.patterns.filter(p => p.test(cleanedTurn)).length;
+          return (otherCount > (best.count || 0)) ? { id: other.id, count: otherCount } : best;
+        }, { id: null, count: 0 });
+        // If another theme matches more patterns than this one, skip this quote for this theme
+        if (dominantIssueId.count > turnMatchCount) return;
+
+        // Turn is short enough to use whole (≤320 chars) — ideal, cleanest quote
+        if (cleanedTurn.length <= 320) {
+          const q = cleanQuote(cleanedTurn);
+          if (q.length > 25 && !containsPII(q) && isCustomerSentence(q)) themeMap[issue.id].quotes.add(q);
+        } else {
+          // Turn is long (e.g. email body) — extract the most relevant sentence from it
+          const sents = cleanedTurn.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.length > 20 && s.length < 320);
+          for (const s of sents) {
+            if (!issue.patterns.some(p => p.test(s))) continue;
+            if (!/\b(I|my|me|I'm|I've|I'd|I'll)\b/i.test(s)) continue;
+            if (s.split(/\s+/).length < 7) continue;
+            if (containsPII(s)) continue;
+            if (!isCustomerSentence(s)) continue;
+            // Cross-theme check at sentence level too
+            const sDominant = ISSUE_CATALOG.reduce((best, other) => {
+              if (other.id === issue.id) return best;
+              const c = other.patterns.filter(p => p.test(s)).length;
+              return c > (best.count || 0) ? { id: other.id, count: c } : best;
+            }, { id: null, count: 0 });
+            const sMatchCount = issue.patterns.filter(p => p.test(s)).length;
+            if (sDominant.count > sMatchCount) continue;
+            const q = cleanQuote(s);
             if (q.length > 25 && !containsPII(q)) themeMap[issue.id].quotes.add(q);
-          } else {
-            // Turn is long (e.g. email body) — extract the most relevant sentence from it
-            const sents = cleanedTurn.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.length > 20 && s.length < 320);
-            for (const s of sents) {
-              if (!issue.patterns.some(p => p.test(s))) continue;
-              if (!/\b(I|my|me|I'm|I've|I'd|I'll)\b/i.test(s)) continue;
-              if (s.split(/\s+/).length < 7) continue;
-              if (containsPII(s)) continue;
-              if (!isCustomerSentence(s)) continue;
-              const q = cleanQuote(s);
-              if (q.length > 25 && !containsPII(q)) themeMap[issue.id].quotes.add(q);
-            }
           }
         }
       });
@@ -565,6 +594,13 @@ function analyzeConversations(rows, headerMap) {
     const rankedQuotes = Array.from(t.quotes).filter(q => isCustomerSentence(q) && !containsPII(q)).map(q => {
       let score = 0;
       const len = q.length;
+      // ── Product relevance: quote must directly reference its product area ──
+      // Perpay+ quotes must mention subscription/membership/perpay+/credit building
+      if (t.product === 'Perpay+' && !/\b(?:perpay\s*\+|perpay\s+plus|subscription|membership|credit\s+(?:building|score|report|bureau)|experian|transunion|equifax)\b/i.test(q)) score -= 20;
+      // Card quotes must mention the card or a card-specific concept
+      if (t.product === 'Card' && !/\b(?:card|credit\s+card|perpay\s+card|my\s+card|transaction|charge|declined|dispute|limit|fraud)\b/i.test(q)) score -= 20;
+      // Marketplace quotes must mention an order, item, or shipping concept
+      if (t.product === 'Marketplace' && !/\b(?:order|item|ship(?:ping|ped)?|deliver(?:y|ed)?|return|refund|package|product|purchase|checkout)\b/i.test(q)) score -= 20;
       // Hard reject — these should never reach here, but catch any stragglers
       if (/Repayment\s*[•]/.test(q)) score -= 20;
       // Hard reject: pure command with no context
